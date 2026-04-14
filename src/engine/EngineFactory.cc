@@ -10,6 +10,7 @@
 #include "Bmc.h"
 #include "DAR.h"
 #include "IMC.h"
+#include "ImplicitTPA.h"
 #include "Kind.h"
 #include "Lawi.h"
 #include "PDKind.h"
@@ -44,6 +45,8 @@ std::unique_ptr<Engine> EngineFactory::getEngine(std::string_view engine) && {
         return std::make_unique<SymbolicExecution>(logic, options);
     } else if (engine == "trl") {
         return std::make_unique<TRL>(logic, options);
+    } else if (engine == "implicit-tpa") {
+        return std::make_unique<ImplicitTPA>(logic, options);
     } else {
         throw std::invalid_argument("Unknown engine specified");
     }
