@@ -23,6 +23,10 @@ const std::string Options::LRA_ITP_ALG = "lra-itp-algorithm";
 const std::string Options::FORCED_COVERING = "forced-covering";
 const std::string Options::VERBOSE = "verbose";
 const std::string Options::TPA_USE_QE = "tpa.use-qe";
+const std::string Options::IC3IA_USE_UNSAT_CORE_GENERALIZATION = "ic3ia.unsat-core-generalization";
+const std::string Options::IC3IA_MINIMIZE_REFINEMENT_PREDICATES = "ic3ia.minimize-refinement-predicates";
+const std::string Options::IC3IA_USE_BINARY_REFINEMENT_INTERPOLANTS = "ic3ia.binary-refinement-interpolants";
+const std::string Options::IC3IA_ADD_INITIAL_RESET = "ic3ia.initial-reset";
 const std::string Options::FORCE_TS = "force-ts";
 const std::string Options::SIMPLIFY_NESTED = "simplify-nested";
 const std::string Options::PROOF_FORMAT = "proof-format";
@@ -40,6 +44,7 @@ void printUsage() {
            "-e,--engine <name>              Select engine to use; supported engines:\n"
            "                                  bmc - Bounded Model Checking (only linear systems)\n"
            "                                  dar - Dual Approximated Reachability (only linear systems)\n"
+           "                                  ic3ia - IC3 with Implicit Predicate Abstraction (only linear systems)\n"
            "                                  imc - McMillan's original Interpolation-based model checking (only linear systems)\n"
            "                                  kind - basic k-induction algorithm (only transition systems)\n"
            "                                  lawi - Lazy Abstraction with Interpolants (only linear systems)\n"
@@ -59,6 +64,14 @@ void printUsage() {
            "-v                              Increase verbosity (can be applied multiple times)\n"
            "-i,--input <file>               Input file (option not required)\n"
            "--force-ts                      Always encode linear system into transition system (affects BMC and TPA)\n"
+           "--ic3ia.unsat-core-generalization[=bool]\n"
+           "                                Use unsat-core-only cube generalization in IC3IA (default: true)\n"
+           "--ic3ia.minimize-refinement-predicates[=bool]\n"
+           "                                Minimize interpolant-derived predicates after refinement in IC3IA (default: true)\n"
+           "--ic3ia.binary-refinement-interpolants[=bool]\n"
+           "                                Use binary interpolants in IC3IA refinement instead of path interpolants (default: false)\n"
+           "--ic3ia.initial-reset[=bool]\n"
+           "                                Add a reset state so IC3IA does not seed from the full init formula (default: true)\n"
            "--termination-backend <name>    Select backend algorithm for termination problems:\n"
            "                                  lasso-finder - searches for lasso in the system\n"
            "                                  nontermination-via-safety - gradually eliminates terminating traces from the system\n"
@@ -81,6 +94,10 @@ Options CommandLineParser::parse(int argc, char ** argv) {
     int forcedCovering = 0;
     int verbose = 0;
     int tpaUseQE = 0;
+    int ic3iaUseUnsatCoreGeneralization = 0;
+    int ic3iaMinimizeRefinementPredicates = 0;
+    int ic3iaUseBinaryRefinementInterpolants = 0;
+    int ic3iaAddInitialReset = 1;
     int printVersion = 0;
     int forceTS = 0;
     int simplifyNested = 0;
@@ -98,6 +115,10 @@ Options CommandLineParser::parse(int argc, char ** argv) {
                                     {Options::FORCED_COVERING.c_str(), optional_argument, &forcedCovering, 1},
                                     {Options::VERBOSE.c_str(), optional_argument, &verbose, 1},
                                     {Options::TPA_USE_QE.c_str(), optional_argument, &tpaUseQE, 1},
+                                    {Options::IC3IA_USE_UNSAT_CORE_GENERALIZATION.c_str(), optional_argument, &ic3iaUseUnsatCoreGeneralization, 1},
+                                    {Options::IC3IA_MINIMIZE_REFINEMENT_PREDICATES.c_str(), optional_argument, &ic3iaMinimizeRefinementPredicates, 1},
+                                    {Options::IC3IA_USE_BINARY_REFINEMENT_INTERPOLANTS.c_str(), optional_argument, &ic3iaUseBinaryRefinementInterpolants, 1},
+                                    {Options::IC3IA_ADD_INITIAL_RESET.c_str(), optional_argument, &ic3iaAddInitialReset, 1},
                                     {Options::PROOF_FORMAT.c_str(), required_argument, nullptr, 'p'},
                                     {Options::FORCE_TS.c_str(), no_argument, &forceTS, 1},
                                     {Options::SIMPLIFY_NESTED.c_str(), no_argument, &simplifyNested, 1},
@@ -126,6 +147,30 @@ Options CommandLineParser::parse(int argc, char ** argv) {
                     }
                 } else if (long_options[option_index].flag == &tpaUseQE) {
                     tpaUseQE = 1;
+                } else if (long_options[option_index].flag == &ic3iaUseUnsatCoreGeneralization and optarg) {
+                    if (isDisableKeyword(optarg)) {
+                        ic3iaUseUnsatCoreGeneralization = 0;
+                    } else {
+                        ic3iaUseUnsatCoreGeneralization = 1;
+                    }
+                } else if (long_options[option_index].flag == &ic3iaMinimizeRefinementPredicates and optarg) {
+                    if (isDisableKeyword(optarg)) {
+                        ic3iaMinimizeRefinementPredicates = 0;
+                    } else {
+                        ic3iaMinimizeRefinementPredicates = 1;
+                    }
+                } else if (long_options[option_index].flag == &ic3iaUseBinaryRefinementInterpolants and optarg) {
+                    if (isDisableKeyword(optarg)) {
+                        ic3iaUseBinaryRefinementInterpolants = 0;
+                    } else {
+                        ic3iaUseBinaryRefinementInterpolants = 1;
+                    }
+                } else if (long_options[option_index].flag == &ic3iaAddInitialReset and optarg) {
+                    if (isDisableKeyword(optarg)) {
+                        ic3iaAddInitialReset = 0;
+                    } else {
+                        ic3iaAddInitialReset = 1;
+                    }
                 } else if (long_options[option_index].flag == &lraItpAlg) {
                     assert(optarg);
                     lraItpAlg = std::atoi(optarg);
@@ -179,6 +224,10 @@ Options CommandLineParser::parse(int argc, char ** argv) {
     if (validate || computeWitness || printWitness) { res.addOption(Options::COMPUTE_WITNESS, "true"); }
     if (forcedCovering) { res.addOption(Options::FORCED_COVERING, "true"); }
     if (tpaUseQE) { res.addOption(Options::TPA_USE_QE, "true"); }
+    if (ic3iaUseUnsatCoreGeneralization) { res.addOption(Options::IC3IA_USE_UNSAT_CORE_GENERALIZATION, "true"); }
+    if (ic3iaMinimizeRefinementPredicates) { res.addOption(Options::IC3IA_MINIMIZE_REFINEMENT_PREDICATES, "true"); }
+    if (ic3iaUseBinaryRefinementInterpolants) { res.addOption(Options::IC3IA_USE_BINARY_REFINEMENT_INTERPOLANTS, "true"); }
+    res.addOption(Options::IC3IA_ADD_INITIAL_RESET, ic3iaAddInitialReset ? "true" : "false");
     if (forceTS) { res.addOption(Options::FORCE_TS, "true"); }
     if (simplifyNested) { res.addOption(Options::SIMPLIFY_NESTED, "true"); }
     res.addOption(Options::LRA_ITP_ALG, std::to_string(lraItpAlg));
