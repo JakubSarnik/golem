@@ -19,6 +19,8 @@ class IC3LIATest : public LIAEngineTest {};
 
 TEST_F(IC3LIATest, test_IC3IA_simple_unsafe) {
     Options options;
+    options.addOption(Options::LOGIC, "QF_LIA");
+    options.addOption(Options::COMPUTE_WITNESS, "true");
     SymRef s1 = mkPredicateSymbol("s1", {intSort()});
     PTRef current = instantiatePredicate(s1, {x});
     PTRef next    = instantiatePredicate(s1, {xp});
@@ -38,11 +40,13 @@ TEST_F(IC3LIATest, test_IC3IA_simple_unsafe) {
         }
     };
     IC3IA engine(*logic, options);
-    solveSystem(clauses, engine, VerificationAnswer::UNSAFE, false);
+    solveSystem(clauses, engine, VerificationAnswer::UNSAFE, true);
 }
 
 TEST_F(IC3LIATest, test_IC3IA_simple_safe) {
     Options options;
+    options.addOption(Options::LOGIC, "QF_LIA");
+    options.addOption(Options::COMPUTE_WITNESS, "true");
     SymRef s1 = mkPredicateSymbol("s1", {intSort()});
     PTRef current = instantiatePredicate(s1, {x});
     PTRef next    = instantiatePredicate(s1, {xp});
@@ -62,11 +66,13 @@ TEST_F(IC3LIATest, test_IC3IA_simple_safe) {
         }
     };
     IC3IA engine(*logic, options);
-    solveSystem(clauses, engine, VerificationAnswer::SAFE, false);
+    solveSystem(clauses, engine, VerificationAnswer::SAFE, true);
 }
 
 TEST_F(IC3LIATest, test_IC3IA_two_vars_safe) {
     Options options;
+    options.addOption(Options::LOGIC, "QF_LIA");
+    options.addOption(Options::COMPUTE_WITNESS, "true");
     SymRef s1 = mkPredicateSymbol("s1", {intSort(), intSort()});
     PTRef current = instantiatePredicate(s1, {x, y});
     PTRef next    = instantiatePredicate(s1, {xp, yp});
@@ -87,11 +93,13 @@ TEST_F(IC3LIATest, test_IC3IA_two_vars_safe) {
         }
     };
     IC3IA engine(*logic, options);
-    solveSystem(clauses, engine, VerificationAnswer::SAFE, false);
+    solveSystem(clauses, engine, VerificationAnswer::SAFE, true);
 }
 
 TEST_F(IC3LIATest, test_IC3IA_init_violates_property) {
     Options options;
+    options.addOption(Options::LOGIC, "QF_LIA");
+    options.addOption(Options::COMPUTE_WITNESS, "true");
     SymRef s1 = mkPredicateSymbol("s1", {intSort()});
     PTRef current = instantiatePredicate(s1, {x});
     PTRef next    = instantiatePredicate(s1, {xp});
@@ -112,5 +120,5 @@ TEST_F(IC3LIATest, test_IC3IA_init_violates_property) {
         }
     };
     IC3IA engine(*logic, options);
-    solveSystem(clauses, engine, VerificationAnswer::UNSAFE, false);
+    solveSystem(clauses, engine, VerificationAnswer::UNSAFE, true);
 }

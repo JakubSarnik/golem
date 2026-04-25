@@ -387,12 +387,23 @@ TransitionSystemVerificationResult IC3IA::solve(TransitionSystem const & system)
         if (result.answer == VerificationAnswer::SAFE) {
             PTRef abstractInv = std::get<PTRef>(result.witness);
             PTRef concreteInv = concreteInvariant(abstractInv);
+            if (addInitialReset_) {
+                // Substitute reset → false to eliminate the internal reset variable.
+                // In all reachable states of the original system, reset is always false.
+                TimeMachine tm{logic_};
+                PTRef resetVar = tm.getVarVersionZero("ic3ia_reset", logic_.getSort_bool());
+                TermUtils::substitutions_map subst;
+                subst[resetVar] = logic_.getTerm_false();
+                concreteInv = TermUtils(logic_).varSubstitute(concreteInv, subst);
+            }
             return {VerificationAnswer::SAFE, concreteInv};
         }
 
         if (result.answer == VerificationAnswer::UNSAFE) {
             std::size_t realDepth = 0;
             if (checkAndRefine(realDepth)) {
+                // The reset transformation adds one extra step at the front; subtract it.
+                if (addInitialReset_ && realDepth > 0) { --realDepth; }
                 return {VerificationAnswer::UNSAFE, realDepth};
             }
             if (verbosity_ > 0) {
