@@ -91,7 +91,7 @@ private:
     // --- IC3 core methods ---
 
     void resetIC3State();
-    TransitionSystemVerificationResult runIC3();
+    TransitionSystemVerificationResult runIC3(bool resuming = false);
 
     void  pushFrame()          { ++depth_; }
     PTRef getF(unsigned k) const;
@@ -143,9 +143,25 @@ private:
 
     // --- Abstract system construction ---
 
+    // Number of predicates whose label-definition equalities have already been
+    // conjoined into init_/trans_/bad_. Maintained monotonically across CEGAR
+    // iterations so that extendAbstractSystem() only asserts new predicates.
+    std::size_t numAssertedPreds_{0};
+
     PTRef abstractFormula(PTRef fla) const;
-    void  setupAbstractSystem();
+    void  initializeAbstractSystem();
+    void  extendAbstractSystem();
     PTRef concreteInvariant(PTRef abstractInv) const;
+
+    // --- Persistent solvers for IC3 queries ---
+    //
+    // Both solvers are seeded once with the abstract system's constant context
+    // (init_ / trans_) in initializeAbstractSystem(). New label-definition
+    // conjuncts produced by extendAbstractSystem() are asserted incrementally,
+    // outside any push scope, so they persist across queries. Each query uses
+    // push()/pop() to scope its query-specific assertions.
+    std::unique_ptr<SMTSolver> initSolver_;
+    std::unique_ptr<SMTSolver> transSolver_;
 
     // --- Concrete CEGAR check ---
 

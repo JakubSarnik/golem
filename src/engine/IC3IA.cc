@@ -45,21 +45,23 @@ void IC3IA::resetIC3State() {
     cexTrace_.clear();
 }
 
-TransitionSystemVerificationResult IC3IA::runIC3() {
-    if (verbosity_ > 0) { std::cout << "[IC3] Starting\n"; }
+TransitionSystemVerificationResult IC3IA::runIC3(bool resuming) {
+    if (verbosity_ > 0) { std::cout << "[IC3] " << (resuming ? "Resuming" : "Starting") << "\n"; }
 
-    // Base check: Init ∧ bad SAT → immediately unsafe.
-    {
-        SMTSolver solver(logic_, SMTSolver::WitnessProduction::NONE);
-        solver.assertProp(init_);
-        solver.assertProp(bad_);
-        if (solver.check() == SMTSolver::Answer::SAT) {
-            if (verbosity_ > 0) { std::cout << "[IC3] Initial states satisfy bad\n"; }
-            return {VerificationAnswer::UNSAFE, 0u};
+    if (!resuming) {
+        // Base check: Init ∧ bad SAT → immediately unsafe.
+        {
+            SMTSolver solver(logic_, SMTSolver::WitnessProduction::NONE);
+            solver.assertProp(init_);
+            solver.assertProp(bad_);
+            if (solver.check() == SMTSolver::Answer::SAT) {
+                if (verbosity_ > 0) { std::cout << "[IC3] Initial states satisfy bad\n"; }
+                return {VerificationAnswer::UNSAFE, 0u};
+            }
         }
-    }
 
-    pushFrame(); // depth_ = 1
+        pushFrame(); // depth_ = 1
+    }
 
     while (true) {
         if (verbosity_ > 0) { std::cout << "[IC3] Depth = " << depth_ << "\n"; }
@@ -152,31 +154,34 @@ IC3IA::Cube IC3IA::modelToCube(std::shared_ptr<Model> const & model,
 //=============================================================================
 
 bool IC3IA::initIntersects(Cube const & cube) const {
-    SMTSolver solver(logic_, SMTSolver::WitnessProduction::NONE);
-    solver.assertProp(init_);
-    solver.assertProp(cubeToFla(cube));
-    return solver.check() == SMTSolver::Answer::SAT;
+    initSolver_->push();
+    initSolver_->assertProp(cubeToFla(cube));
+    auto const res = initSolver_->check();
+    initSolver_->pop();
+    return res == SMTSolver::Answer::SAT;
 }
 
 bool IC3IA::hasBadSuccessor(Cube & outCube) const {
-    SMTSolver solver(logic_, SMTSolver::WitnessProduction::ONLY_MODEL);
-    solver.assertProp(getF(depth_));
-    solver.assertProp(trans_);
-    solver.assertProp(prime(bad_));
-    if (solver.check() != SMTSolver::Answer::SAT) { return false; }
-    outCube = modelToCube(solver.getModel(), stateVars_);
-    return true;
+    transSolver_->push();
+    transSolver_->assertProp(getF(depth_));
+    transSolver_->assertProp(prime(bad_));
+    auto const res = transSolver_->check();
+    bool const sat = res == SMTSolver::Answer::SAT;
+    if (sat) { outCube = modelToCube(transSolver_->getModel(), stateVars_); }
+    transSolver_->pop();
+    return sat;
 }
 
 bool IC3IA::hasPredecessorUnder(PTRef frameFormula, Cube const & cube,
                                  Cube & outCTI) const {
-    SMTSolver solver(logic_, SMTSolver::WitnessProduction::ONLY_MODEL);
-    solver.assertProp(frameFormula);
-    solver.assertProp(trans_);
-    solver.assertProp(prime(cubeToFla(cube)));
-    if (solver.check() != SMTSolver::Answer::SAT) { return false; }
-    outCTI = modelToCube(solver.getModel(), stateVars_);
-    return true;
+    transSolver_->push();
+    transSolver_->assertProp(frameFormula);
+    transSolver_->assertProp(prime(cubeToFla(cube)));
+    auto const res = transSolver_->check();
+    bool const sat = res == SMTSolver::Answer::SAT;
+    if (sat) { outCTI = modelToCube(transSolver_->getModel(), stateVars_); }
+    transSolver_->pop();
+    return sat;
 }
 
 bool IC3IA::hasPredecessor(Cube const & cube, unsigned level, Cube & outCTI) const {
@@ -328,11 +333,12 @@ bool IC3IA::propagateClauses() {
         for (auto & c : clauses_) {
             if (c.level != i) { continue; }
             PTRef negClausePrimed = prime(logic_.mkNot(c.fla));
-            SMTSolver solver(logic_, SMTSolver::WitnessProduction::NONE);
-            solver.assertProp(getF(i));
-            solver.assertProp(trans_);
-            solver.assertProp(negClausePrimed);
-            if (solver.check() == SMTSolver::Answer::UNSAT) {
+            transSolver_->push();
+            transSolver_->assertProp(getF(i));
+            transSolver_->assertProp(negClausePrimed);
+            auto const res = transSolver_->check();
+            transSolver_->pop();
+            if (res == SMTSolver::Answer::UNSAT) {
                 c.level = i + 1;
             }
         }
@@ -378,11 +384,16 @@ TransitionSystemVerificationResult IC3IA::solve(TransitionSystem const & system)
         std::cout << "[IC3IA] Initial predicates: " << predicates_.size() << "\n";
     }
 
+    initializeAbstractSystem();
+    resetIC3State();
+
     static constexpr unsigned maxRefinements = 1000;
     for (unsigned iter = 0; iter < maxRefinements; ++iter) {
-        setupAbstractSystem();
-
-        auto result = runIC3();
+        // Resume after the first iteration: keep frames, depth, and learned
+        // clauses across CEGAR refinements. Soundness comes from the paper's
+        // Lemma 1, so previously inductive clauses remain
+        // inductive in the strengthened abstract system.
+        auto result = runIC3(/*resuming=*/iter > 0);
 
         if (result.answer == VerificationAnswer::SAFE) {
             PTRef abstractInv = std::get<PTRef>(result.witness);
@@ -411,6 +422,8 @@ TransitionSystemVerificationResult IC3IA::solve(TransitionSystem const & system)
                           << std::get<std::size_t>(result.witness)
                           << "; predicates now: " << predicates_.size() << "\n";
             }
+            extendAbstractSystem();
+            cexTrace_.clear();
             continue;
         }
 
@@ -627,31 +640,57 @@ PTRef IC3IA::abstractFormula(PTRef fla) const {
     return fla;
 }
 
-void IC3IA::setupAbstractSystem() {
+void IC3IA::initializeAbstractSystem() {
     assert(!predicates_.empty());
 
-    vec<PTRef> labelDefParts;
-    for (std::size_t i = 0; i < predicates_.size(); ++i) {
-        labelDefParts.push(logic_.mkEq(predLabels_[i], predicates_[i]));
-    }
-    PTRef labelDefs = logic_.mkAnd(labelDefParts);
+    init_  = concreteInit_;
+    bad_   = concreteBad_;
+    trans_ = concreteTrans_;
+    stateVars_.clear();
+    nextStateVars_.clear();
+    numAssertedPreds_ = 0;
 
-    init_ = logic_.mkAnd(concreteInit_, labelDefs);
-    bad_  = logic_.mkAnd(concreteBad_,  labelDefs);
+    initSolver_  = std::make_unique<SMTSolver>(logic_, SMTSolver::WitnessProduction::NONE);
+    transSolver_ = std::make_unique<SMTSolver>(logic_, SMTSolver::WitnessProduction::ONLY_MODEL);
+    initSolver_->assertProp(concreteInit_);
+    transSolver_->assertProp(concreteTrans_);
+
+    extendAbstractSystem();
+}
+
+void IC3IA::extendAbstractSystem() {
+    if (numAssertedPreds_ == predicates_.size()) { return; }
+
+    vec<PTRef> newLabelDefParts;
+    vec<PTRef> newNextDefParts;
+    for (std::size_t i = numAssertedPreds_; i < predicates_.size(); ++i) {
+        newLabelDefParts.push(logic_.mkEq(predLabels_[i], predicates_[i]));
+        PTRef pNext = shiftFormulaThroughTime(predicates_[i], 1);
+        newNextDefParts.push(logic_.mkEq(predLabelsNext_[i], pNext));
+    }
+    PTRef newLabelDefs =
+        newLabelDefParts.size() == 1 ? newLabelDefParts[0] : logic_.mkAnd(newLabelDefParts);
+
+    init_ = logic_.mkAnd(init_, newLabelDefs);
+    bad_  = logic_.mkAnd(bad_,  newLabelDefs);
 
     vec<PTRef> transParts;
-    transParts.push(concreteTrans_);
-    transParts.push(labelDefs);
-    for (std::size_t i = 0; i < predicates_.size(); ++i) {
-        PTRef pNext = shiftFormulaThroughTime(predicates_[i], 1);
-        transParts.push(logic_.mkEq(predLabelsNext_[i], pNext));
-    }
+    transParts.push(trans_);
+    transParts.push(newLabelDefs);
+    for (int i = 0; i < newNextDefParts.size(); ++i) { transParts.push(newNextDefParts[i]); }
     trans_ = logic_.mkAnd(transParts);
+
+    // Mirror the new conjuncts into the persistent query solvers.
+    initSolver_->assertProp(newLabelDefs);
+    transSolver_->assertProp(newLabelDefs);
+    for (int i = 0; i < newNextDefParts.size(); ++i) {
+        transSolver_->assertProp(newNextDefParts[i]);
+    }
 
     stateVars_     = predLabels_;
     nextStateVars_ = predLabelsNext_;
 
-    resetIC3State();
+    numAssertedPreds_ = predicates_.size();
 }
 
 PTRef IC3IA::concreteInvariant(PTRef abstractInv) const {
