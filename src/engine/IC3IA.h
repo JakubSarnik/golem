@@ -46,8 +46,6 @@ public:
 
 private:
     // --- IC3 core types ---
-
-    // A cube is a conjunction of literals over the current state variables.
     using Cube = std::vector<PTRef>;
 
     // Proof obligation: prove `cube` is not reachable at `level` steps from Init.
@@ -73,7 +71,13 @@ private:
     bool      useUnsatCoreGeneralization_{true};
     bool      minimizeRefinementPredicates_{true};
     bool      useBinaryRefinementInterpolants_{false};
-    bool      addInitialReset_{true};
+    bool      addInitialReset_{false};
+    bool      makeSimpleProperty_{false};
+
+    // When makeSimpleProperty_ is on, the original bad formula is stashed here
+    // so the SAFE invariant can be translated back (substitute p -> origBad).
+    PTRef     simplePropOrigBad_{PTRef_Undef};
+    PTRef     simplePropVar_{PTRef_Undef};
 
     // Set before calling runIC3(); setupAbstractSystem() fills these with abstract formulas.
     PTRef                init_{PTRef_Undef};
@@ -90,7 +94,6 @@ private:
 
     // --- IC3 core methods ---
 
-    void resetIC3State();
     TransitionSystemVerificationResult runIC3(bool resuming = false);
 
     void  pushFrame()          { ++depth_; }
@@ -104,7 +107,7 @@ private:
                       std::vector<PTRef> const & vars) const;
 
     bool  initIntersects(Cube const & cube) const;
-    bool  hasBadSuccessor(Cube & outCube) const;
+    bool  hasBadState(Cube & outCube) const;
     bool  hasPredecessorUnder(PTRef frameFormula, Cube const & cube,
                                Cube & outCTI) const;
     bool  hasPredecessor(Cube const & cube, unsigned level, Cube & outCTI) const;
@@ -139,6 +142,7 @@ private:
                                                       std::size_t depth) const;
     bool addPredicate(PTRef pred);
     void applyInitialReset();
+    void applySimpleProperty();
     void initializePredicates();
 
     // --- Abstract system construction ---
@@ -154,14 +158,13 @@ private:
     PTRef concreteInvariant(PTRef abstractInv) const;
 
     // --- Persistent solvers for IC3 queries ---
-    //
-    // Both solvers are seeded once with the abstract system's constant context
-    // (init_ / trans_) in initializeAbstractSystem(). New label-definition
-    // conjuncts produced by extendAbstractSystem() are asserted incrementally,
-    // outside any push scope, so they persist across queries. Each query uses
-    // push()/pop() to scope its query-specific assertions.
     std::unique_ptr<SMTSolver> initSolver_;
     std::unique_ptr<SMTSolver> transSolver_;
+
+    // Activation literal guarding concreteTrans_ in transSolver_. Asserted true
+    // for queries that need the transition relation (predecessor, propagation),
+    // and false for queries about a single state (hasBadState).
+    PTRef transAct_{PTRef_Undef};
 
     // --- Concrete CEGAR check ---
 

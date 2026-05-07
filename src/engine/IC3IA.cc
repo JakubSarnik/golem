@@ -15,6 +15,7 @@
 #include <chrono>
 #include <iostream>
 #include <sstream>
+#include <stdexcept>
 
 namespace golem {
 
@@ -33,17 +34,13 @@ IC3IA::IC3IA(Logic & logic, Options const & options) : logic_(logic) {
         options.getOrDefault(Options::IC3IA_USE_BINARY_REFINEMENT_INTERPOLANTS, "false") == "true";
     addInitialReset_ =
         options.getOrDefault(Options::IC3IA_ADD_INITIAL_RESET, "true") == "true";
+    makeSimpleProperty_ =
+        options.getOrDefault(Options::IC3IA_MAKE_SIMPLE_PROPERTY, "false") == "true";
 }
 
 //=============================================================================
-// IC3 core — reset and main loop
+// IC3 core — main loop
 //=============================================================================
-
-void IC3IA::resetIC3State() {
-    depth_ = 0;
-    clauses_.clear();
-    cexTrace_.clear();
-}
 
 TransitionSystemVerificationResult IC3IA::runIC3(bool resuming) {
     if (verbosity_ > 0) { std::cout << "[IC3] " << (resuming ? "Resuming" : "Starting") << "\n"; }
@@ -51,10 +48,11 @@ TransitionSystemVerificationResult IC3IA::runIC3(bool resuming) {
     if (!resuming) {
         // Base check: Init ∧ bad SAT → immediately unsafe.
         {
-            SMTSolver solver(logic_, SMTSolver::WitnessProduction::NONE);
-            solver.assertProp(init_);
-            solver.assertProp(bad_);
-            if (solver.check() == SMTSolver::Answer::SAT) {
+            initSolver_->push();
+            initSolver_->assertProp(bad_);
+            auto const res = initSolver_->check();
+            initSolver_->pop();
+            if (res == SMTSolver::Answer::SAT) {
                 if (verbosity_ > 0) { std::cout << "[IC3] Initial states satisfy bad\n"; }
                 return {VerificationAnswer::UNSAFE, 0u};
             }
@@ -67,7 +65,7 @@ TransitionSystemVerificationResult IC3IA::runIC3(bool resuming) {
         if (verbosity_ > 0) { std::cout << "[IC3] Depth = " << depth_ << "\n"; }
 
         Cube badCube;
-        while (hasBadSuccessor(badCube)) {
+        while (hasBadState(badCube)) {
             if (!blockObligations(Obligation{badCube, depth_, nullptr})) {
                 if (verbosity_ > 0) { std::cout << "[IC3] Counterexample found\n"; }
                 return {VerificationAnswer::UNSAFE, depth_};
@@ -161,10 +159,13 @@ bool IC3IA::initIntersects(Cube const & cube) const {
     return res == SMTSolver::Answer::SAT;
 }
 
-bool IC3IA::hasBadSuccessor(Cube & outCube) const {
+bool IC3IA::hasBadState(Cube & outCube) const {
+    // Disable the trans relation via transAct_ so the query is over a single
+    // current state (label-defs still apply, giving labels their meaning).
     transSolver_->push();
+    transSolver_->assertProp(logic_.mkNot(transAct_));
     transSolver_->assertProp(getF(depth_));
-    transSolver_->assertProp(prime(bad_));
+    transSolver_->assertProp(bad_);
     auto const res = transSolver_->check();
     bool const sat = res == SMTSolver::Answer::SAT;
     if (sat) { outCube = modelToCube(transSolver_->getModel(), stateVars_); }
@@ -175,6 +176,7 @@ bool IC3IA::hasBadSuccessor(Cube & outCube) const {
 bool IC3IA::hasPredecessorUnder(PTRef frameFormula, Cube const & cube,
                                  Cube & outCTI) const {
     transSolver_->push();
+    transSolver_->assertProp(transAct_);
     transSolver_->assertProp(frameFormula);
     transSolver_->assertProp(prime(cubeToFla(cube)));
     auto const res = transSolver_->check();
@@ -334,6 +336,7 @@ bool IC3IA::propagateClauses() {
             if (c.level != i) { continue; }
             PTRef negClausePrimed = prime(logic_.mkNot(c.fla));
             transSolver_->push();
+            transSolver_->assertProp(transAct_);
             transSolver_->assertProp(getF(i));
             transSolver_->assertProp(negClausePrimed);
             auto const res = transSolver_->check();
@@ -370,6 +373,11 @@ TransitionSystemVerificationResult IC3IA::solve(TransitionSystem const & system)
     concreteStateVars_    = system.getStateVars();
     concreteNextStateVars_= system.getNextStateVars();
 
+    simplePropOrigBad_ = PTRef_Undef;
+    simplePropVar_ = PTRef_Undef;
+    if (makeSimpleProperty_) {
+        applySimpleProperty();
+    }
     if (addInitialReset_) {
         applyInitialReset();
     }
@@ -385,14 +393,10 @@ TransitionSystemVerificationResult IC3IA::solve(TransitionSystem const & system)
     }
 
     initializeAbstractSystem();
-    resetIC3State();
 
-    static constexpr unsigned maxRefinements = 1000;
-    for (unsigned iter = 0; iter < maxRefinements; ++iter) {
+    for (unsigned iter = 0; ; ++iter) {
         // Resume after the first iteration: keep frames, depth, and learned
-        // clauses across CEGAR refinements. Soundness comes from the paper's
-        // Lemma 1, so previously inductive clauses remain
-        // inductive in the strengthened abstract system.
+        // clauses across CEGAR refinements. 
         auto result = runIC3(/*resuming=*/iter > 0);
 
         if (result.answer == VerificationAnswer::SAFE) {
@@ -405,6 +409,11 @@ TransitionSystemVerificationResult IC3IA::solve(TransitionSystem const & system)
                 PTRef resetVar = tm.getVarVersionZero("ic3ia_reset", logic_.getSort_bool());
                 TermUtils::substitutions_map subst;
                 subst[resetVar] = logic_.getTerm_false();
+                concreteInv = TermUtils(logic_).varSubstitute(concreteInv, subst);
+            }
+            if (makeSimpleProperty_ && simplePropVar_ != PTRef_Undef) {
+                TermUtils::substitutions_map subst;
+                subst[simplePropVar_] = simplePropOrigBad_;
                 concreteInv = TermUtils(logic_).varSubstitute(concreteInv, subst);
             }
             return {VerificationAnswer::SAFE, concreteInv};
@@ -429,8 +438,6 @@ TransitionSystemVerificationResult IC3IA::solve(TransitionSystem const & system)
 
         return result;
     }
-
-    return {VerificationAnswer::UNKNOWN, 0u};
 }
 
 //=============================================================================
@@ -472,19 +479,16 @@ PTRef IC3IA::shiftFormulaThroughTime(PTRef fla, int steps) const {
 void IC3IA::collectAtoms(PTRef fla, std::vector<PTRef> & atoms) const {
     if (logic_.isTrue(fla) || logic_.isFalse(fla)) { return; }
 
-    Pterm const & t = logic_.getPterm(fla);
+    if (logic_.isAtom(fla)) {
+        if (std::find(atoms.begin(), atoms.end(), fla) == atoms.end()) {
+            atoms.push_back(fla);
+        }
+        return;
+    }
 
-    if (logic_.isAnd(fla) || logic_.isOr(fla)) {
-        for (int i = 0; i < t.size(); ++i) { collectAtoms(t[i], atoms); }
-        return;
-    }
-    if (logic_.isNot(fla)) {
-        collectAtoms(t[0], atoms);
-        return;
-    }
-    if (std::find(atoms.begin(), atoms.end(), fla) == atoms.end()) {
-        atoms.push_back(fla);
-    }
+    // Boolean connective: descend into all children.
+    Pterm const & t = logic_.getPterm(fla);
+    for (int i = 0; i < t.size(); ++i) { collectAtoms(t[i], atoms); }
 }
 
 std::vector<PTRef> IC3IA::minimizeRefinementPredicateSet(std::vector<PTRef> candidates,
@@ -575,6 +579,34 @@ bool IC3IA::addPredicate(PTRef pred) {
     return true;
 }
 
+void IC3IA::applySimpleProperty() {
+    // Skip if bad is already a single Boolean state var.
+    if (logic_.isVar(concreteBad_) && logic_.hasSortBool(concreteBad_)) {
+        return;
+    }
+    TimeMachine tm{logic_};
+    PTRef p     = tm.getVarVersionZero("ic3ia_simpleprop", logic_.getSort_bool());
+    PTRef pNext = tm.sendVarThroughTime(p, 1);
+
+    PTRef oldInit  = concreteInit_;
+    PTRef oldTrans = concreteTrans_;
+    PTRef oldBad   = concreteBad_;
+    PTRef badNext  = atTime(oldBad, 1);
+
+    concreteInit_  = logic_.mkAnd(oldInit, logic_.mkEq(p, oldBad));
+    concreteTrans_ = logic_.mkAnd({oldTrans, logic_.mkEq(p, oldBad), logic_.mkEq(pNext, badNext)});
+    concreteBad_   = p;
+    concreteStateVars_.push_back(p);
+    concreteNextStateVars_.push_back(pNext);
+
+    simplePropOrigBad_ = oldBad;
+    simplePropVar_     = p;
+
+    if (verbosity_ > 0) {
+        std::cout << "[IC3IA] Replaced property with single state var\n";
+    }
+}
+
 void IC3IA::applyInitialReset() {
     TimeMachine tm{logic_};
     PTRef reset = tm.getVarVersionZero("ic3ia_reset", logic_.getSort_bool());
@@ -653,7 +685,8 @@ void IC3IA::initializeAbstractSystem() {
     initSolver_  = std::make_unique<SMTSolver>(logic_, SMTSolver::WitnessProduction::NONE);
     transSolver_ = std::make_unique<SMTSolver>(logic_, SMTSolver::WitnessProduction::ONLY_MODEL);
     initSolver_->assertProp(concreteInit_);
-    transSolver_->assertProp(concreteTrans_);
+    transAct_ = logic_.mkBoolVar(".ic3ia_trans_act");
+    transSolver_->assertProp(logic_.mkOr(logic_.mkNot(transAct_), concreteTrans_));
 
     extendAbstractSystem();
 }
@@ -671,8 +704,8 @@ void IC3IA::extendAbstractSystem() {
     PTRef newLabelDefs =
         newLabelDefParts.size() == 1 ? newLabelDefParts[0] : logic_.mkAnd(newLabelDefParts);
 
-    init_ = logic_.mkAnd(init_, newLabelDefs);
-    bad_  = logic_.mkAnd(bad_,  newLabelDefs);
+    init_ = abstractFormula(concreteInit_);
+    bad_  = abstractFormula(concreteBad_);
 
     vec<PTRef> transParts;
     transParts.push(trans_);
@@ -711,7 +744,11 @@ PTRef IC3IA::atTime(PTRef fla, unsigned steps) const {
 }
 
 bool IC3IA::checkAndRefine(std::size_t & outDepth) {
-    std::size_t const k = cexTrace_.empty() ? depth_ : cexTrace_.size();
+    // cexTrace_ contains depth_+1 cubes: cexTrace_[i] is a guide for time i,
+    // and cexTrace_.back() is the original bad-state cube (top of the
+    // obligation chain). Number of transitions is one less than the number of
+    // time points.
+    std::size_t const k = cexTrace_.empty() ? depth_ : cexTrace_.size() - 1;
     auto const refineStart = std::chrono::steady_clock::now();
 
     if (verbosity_ > 1) {
@@ -719,28 +756,31 @@ bool IC3IA::checkAndRefine(std::size_t & outDepth) {
     }
 
     SMTSolver solver(logic_, SMTSolver::WitnessProduction::MODEL_AND_INTERPOLANTS);
+
     solver.getConfig().setSimplifyInterpolant(4);
 
-    auto guidedStateFormulaAt = [&](std::size_t index) {
+    auto guideAt = [&](std::size_t index) -> PTRef {
         if (cexTrace_.empty() || index >= cexTrace_.size()) { return logic_.getTerm_true(); }
         return atTime(concreteInvariant(cubeToFla(cexTrace_[index])), static_cast<unsigned>(index));
     };
 
-    vec<PTRef> initParts;
-    initParts.push(concreteInit_);
-    PTRef guideAtZero = guidedStateFormulaAt(0);
-    if (guideAtZero != logic_.getTerm_true()) { initParts.push(guideAtZero); }
-    solver.assertProp(initParts.size() == 1 ? initParts[0] : logic_.mkAnd(initParts));
-
     for (std::size_t i = 0; i < k; ++i) {
-        vec<PTRef> transParts;
-        transParts.push(atTime(concreteTrans_, static_cast<unsigned>(i)));
-        PTRef guidedState = guidedStateFormulaAt(i + 1);
-        if (guidedState != logic_.getTerm_true()) { transParts.push(guidedState); }
-        solver.assertProp(transParts.size() == 1 ? transParts[0] : logic_.mkAnd(transParts));
+        vec<PTRef> parts;
+        if (i == 0) { parts.push(concreteInit_); }
+        PTRef g = guideAt(i);
+        if (g != logic_.getTerm_true()) { parts.push(g); }
+        parts.push(atTime(concreteTrans_, static_cast<unsigned>(i)));
+        solver.assertProp(parts.size() == 1 ? parts[0] : logic_.mkAnd(parts));
     }
 
-    solver.assertProp(atTime(concreteBad_, static_cast<unsigned>(k)));
+    {
+        PTRef bg = guideAt(k);
+        if (bg == logic_.getTerm_true()) {
+            solver.assertProp(atTime(concreteBad_, static_cast<unsigned>(k)));
+        } else {
+            solver.assertProp(bg);
+        }
+    }
 
     auto const solveStart = std::chrono::steady_clock::now();
     auto res = solver.check();
@@ -763,48 +803,48 @@ bool IC3IA::checkAndRefine(std::size_t & outDepth) {
     }
 
     auto itpCtx = solver.getInterpolationContext();
-    vec<PTRef> interpolantsVec;
-    std::vector<ipartitions_t> pathMasks;
-    pathMasks.reserve(k);
-    for (std::size_t i = 0; i < k; ++i) {
-        ipartitions_t mask = 0;
-        for (std::size_t j = 0; j <= i + 1; ++j) {
-            opensmt::setbit(mask, static_cast<unsigned>(j));
-        }
-        pathMasks.push_back(mask);
-    }
     auto const interpolationStart = std::chrono::steady_clock::now();
-    if (not pathMasks.empty()) {
-        if (useBinaryRefinementInterpolants_) {
-            for (ipartitions_t mask : pathMasks) {
-                std::vector<PTRef> single;
-                itpCtx->getSingleInterpolant(single, mask);
-                if (!single.empty()) { interpolantsVec.push(single.front()); }
-            }
-        } else {
-            itpCtx->getPathInterpolants(interpolantsVec, pathMasks);
-        }
-    }
-    auto const interpolationEnd = std::chrono::steady_clock::now();
-
-    std::vector<PTRef> interpolants;
-    interpolants.reserve(interpolantsVec.size());
-    for (PTRef itp : interpolantsVec) { interpolants.push_back(itp); }
 
     std::vector<PTRef> unshiftedInterpolants;
-    unshiftedInterpolants.reserve(interpolants.size());
+    unshiftedInterpolants.reserve(k);
     std::vector<PTRef> candidatePredicates;
-    for (std::size_t i = 0; i < interpolants.size(); ++i) {
-        PTRef unshifted = shiftFormulaThroughTime(interpolants[i], -static_cast<int>(i + 1));
-        unshiftedInterpolants.push_back(unshifted);
+
+    auto untimeToZero = [&](PTRef fla) -> PTRef {
+        TimeMachine tm{logic_};
+        std::vector<PTRef> vars;
+        collectVars(fla, vars);
+        TermUtils::substitutions_map subst;
+        for (PTRef v : vars) {
+            if (!tm.isVersioned(v)) { continue; }
+            int ver = tm.getVersionNumber(v);
+            if (ver == 0) { continue; }
+            subst[v] = tm.sendVarThroughTime(v, -ver);
+        }
+        if (subst.empty()) { return fla; }
+        return TermUtils(logic_).varSubstitute(fla, subst);
+    };
+    auto absorbAtomsFrom = [&](PTRef itp) {
         std::vector<PTRef> atoms;
-        collectAtoms(unshifted, atoms);
+        collectAtoms(itp, atoms);
         for (PTRef a : atoms) {
             if (std::find(candidatePredicates.begin(), candidatePredicates.end(), a) == candidatePredicates.end()) {
                 candidatePredicates.push_back(a);
             }
         }
+    };
+    for (std::size_t i = 0; i < k; ++i) {
+        ipartitions_t mask = 0;
+        for (std::size_t j = 0; j <= i; ++j) {
+            opensmt::setbit(mask, static_cast<unsigned>(j));
+        }
+        std::vector<PTRef> single;
+        itpCtx->getSingleInterpolant(single, mask);
+        if (single.empty()) { continue; }
+        PTRef untimed = untimeToZero(single.front());
+        unshiftedInterpolants.push_back(untimed);
+        absorbAtomsFrom(untimed);
     }
+    auto const interpolationEnd = std::chrono::steady_clock::now();
 
     if (minimizeRefinementPredicates_) {
         auto minimized = minimizeRefinementPredicateSet(candidatePredicates, unshiftedInterpolants, k);
@@ -825,7 +865,11 @@ bool IC3IA::checkAndRefine(std::size_t & outDepth) {
     }
 
     if (newPreds == 0) {
-        for (PTRef itp : unshiftedInterpolants) { addPredicate(itp); }
+        std::cerr << "[IC3IA] refinement extracted 0 new predicates. k=" << k
+                  << ", existing predicates=" << predicates_.size() << "\n";
+        throw std::runtime_error(
+            "IC3IA refinement failure: no new predicates extracted from "
+            "interpolants of a spurious counterexample");
     }
 
     if (verbosity_ > 1) {

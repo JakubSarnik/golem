@@ -96,6 +96,33 @@ TEST_F(IC3LIATest, test_IC3IA_two_vars_safe) {
     solveSystem(clauses, engine, VerificationAnswer::SAFE, true);
 }
 
+TEST_F(IC3LIATest, test_IC3IA_single_feasible_state) {
+    Options options;
+    options.addOption(Options::LOGIC, "QF_LIA");
+    options.addOption(Options::COMPUTE_WITNESS, "true");
+    SymRef s1 = mkPredicateSymbol("s1", {intSort()});
+    PTRef current = instantiatePredicate(s1, {x});
+    PTRef next    = instantiatePredicate(s1, {xp});
+    // Init: x = 0; Trans: x' = 0; Bad: x > 0
+    std::vector<ChClause> clauses{
+        {
+            ChcHead{UninterpretedPredicate{next}},
+            ChcBody{{logic->mkEq(xp, zero)}, {}}
+        },
+        {
+            ChcHead{UninterpretedPredicate{next}},
+            ChcBody{{logic->mkEq(xp, zero)}, {UninterpretedPredicate{current}}}
+        },
+        {
+            ChcHead{UninterpretedPredicate{logic->getTerm_false()}},
+            ChcBody{{logic->mkGt(x, zero)},
+                    {UninterpretedPredicate{current}}}
+        }
+    };
+    IC3IA engine(*logic, options);
+    solveSystem(clauses, engine, VerificationAnswer::SAFE, true);
+}
+
 TEST_F(IC3LIATest, test_IC3IA_init_violates_property) {
     Options options;
     options.addOption(Options::LOGIC, "QF_LIA");

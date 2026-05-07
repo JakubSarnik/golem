@@ -27,6 +27,7 @@ const std::string Options::IC3IA_USE_UNSAT_CORE_GENERALIZATION = "ic3ia.unsat-co
 const std::string Options::IC3IA_MINIMIZE_REFINEMENT_PREDICATES = "ic3ia.minimize-refinement-predicates";
 const std::string Options::IC3IA_USE_BINARY_REFINEMENT_INTERPOLANTS = "ic3ia.binary-refinement-interpolants";
 const std::string Options::IC3IA_ADD_INITIAL_RESET = "ic3ia.initial-reset";
+const std::string Options::IC3IA_MAKE_SIMPLE_PROPERTY = "ic3ia.make-simple-property";
 const std::string Options::FORCE_TS = "force-ts";
 const std::string Options::SIMPLIFY_NESTED = "simplify-nested";
 const std::string Options::PROOF_FORMAT = "proof-format";
@@ -72,6 +73,8 @@ void printUsage() {
            "                                Use binary interpolants in IC3IA refinement instead of path interpolants (default: false)\n"
            "--ic3ia.initial-reset[=bool]\n"
            "                                Add a reset state so IC3IA does not seed from the full init formula (default: true)\n"
+           "--ic3ia.make-simple-property[=bool]\n"
+           "                                Replace the bad formula with a single fresh predicate in IC3IA (default: false)\n"
            "--termination-backend <name>    Select backend algorithm for termination problems:\n"
            "                                  lasso-finder - searches for lasso in the system\n"
            "                                  nontermination-via-safety - gradually eliminates terminating traces from the system\n"
@@ -98,6 +101,7 @@ Options CommandLineParser::parse(int argc, char ** argv) {
     int ic3iaMinimizeRefinementPredicates = 0;
     int ic3iaUseBinaryRefinementInterpolants = 0;
     int ic3iaAddInitialReset = 1;
+    int ic3iaMakeSimpleProperty = 0;
     int printVersion = 0;
     int forceTS = 0;
     int simplifyNested = 0;
@@ -119,6 +123,7 @@ Options CommandLineParser::parse(int argc, char ** argv) {
                                     {Options::IC3IA_MINIMIZE_REFINEMENT_PREDICATES.c_str(), optional_argument, &ic3iaMinimizeRefinementPredicates, 1},
                                     {Options::IC3IA_USE_BINARY_REFINEMENT_INTERPOLANTS.c_str(), optional_argument, &ic3iaUseBinaryRefinementInterpolants, 1},
                                     {Options::IC3IA_ADD_INITIAL_RESET.c_str(), optional_argument, &ic3iaAddInitialReset, 1},
+                                    {Options::IC3IA_MAKE_SIMPLE_PROPERTY.c_str(), optional_argument, &ic3iaMakeSimpleProperty, 1},
                                     {Options::PROOF_FORMAT.c_str(), required_argument, nullptr, 'p'},
                                     {Options::FORCE_TS.c_str(), no_argument, &forceTS, 1},
                                     {Options::SIMPLIFY_NESTED.c_str(), no_argument, &simplifyNested, 1},
@@ -170,6 +175,12 @@ Options CommandLineParser::parse(int argc, char ** argv) {
                         ic3iaAddInitialReset = 0;
                     } else {
                         ic3iaAddInitialReset = 1;
+                    }
+                } else if (long_options[option_index].flag == &ic3iaMakeSimpleProperty and optarg) {
+                    if (isDisableKeyword(optarg)) {
+                        ic3iaMakeSimpleProperty = 0;
+                    } else {
+                        ic3iaMakeSimpleProperty = 1;
                     }
                 } else if (long_options[option_index].flag == &lraItpAlg) {
                     assert(optarg);
@@ -228,6 +239,7 @@ Options CommandLineParser::parse(int argc, char ** argv) {
     if (ic3iaMinimizeRefinementPredicates) { res.addOption(Options::IC3IA_MINIMIZE_REFINEMENT_PREDICATES, "true"); }
     if (ic3iaUseBinaryRefinementInterpolants) { res.addOption(Options::IC3IA_USE_BINARY_REFINEMENT_INTERPOLANTS, "true"); }
     res.addOption(Options::IC3IA_ADD_INITIAL_RESET, ic3iaAddInitialReset ? "true" : "false");
+    if (ic3iaMakeSimpleProperty) { res.addOption(Options::IC3IA_MAKE_SIMPLE_PROPERTY, "true"); }
     if (forceTS) { res.addOption(Options::FORCE_TS, "true"); }
     if (simplifyNested) { res.addOption(Options::SIMPLIFY_NESTED, "true"); }
     res.addOption(Options::LRA_ITP_ALG, std::to_string(lraItpAlg));

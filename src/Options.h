@@ -49,6 +49,7 @@ public:
     static const std::string IC3IA_MINIMIZE_REFINEMENT_PREDICATES;
     static const std::string IC3IA_USE_BINARY_REFINEMENT_INTERPOLANTS;
     static const std::string IC3IA_ADD_INITIAL_RESET;
+    static const std::string IC3IA_MAKE_SIMPLE_PROPERTY;
     static const std::string FORCE_TS;
     static const std::string SIMPLIFY_NESTED;
     static const std::string TERMINATION_BACKEND;
