@@ -69,8 +69,6 @@ private:
     Logic &   logic_;
     int       verbosity_{0};
     bool      useUnsatCoreGeneralization_{true};
-    bool      minimizeRefinementPredicates_{true};
-    bool      useBinaryRefinementInterpolants_{false};
     bool      addInitialReset_{false};
     bool      makeSimpleProperty_{false};
 

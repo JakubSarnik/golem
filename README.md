@@ -91,9 +91,8 @@ Works only for linear systems of Horn clauses (via transformation to a transitio
 The following are available:
 
 - `--ic3ia.unsat-core-generalization` (default: `true`): when dropping literals from a bad cube, use an unsat core query to identify a minimal subset to keep, rather than dropping them one by one with separate queries.
-- `--ic3ia.minimize-refinement-predicates` (default: `true`): after computing interpolants for a spurious counterexample, use an unsat core query to extract a smaller subset of the interpolant atoms that is sufficient for the refinement.
-- `--ic3ia.binary-refinement-interpolants` (default: `false`): use a single binary interpolant for refinement instead of a full sequence of path interpolants.
 - `--ic3ia.initial-reset` (default: `true`): add a reset state and encodes the concrete init as the first transition step, to avoid starting with the initial predicates.
+- `--ic3ia.make-simple-property` (default: `false`): replace the bad formula with a single fresh predicate, so the abstract bad becomes a single literal.
 
 #### Running multiple engines in parallel
 

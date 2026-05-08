@@ -24,8 +24,6 @@ const std::string Options::FORCED_COVERING = "forced-covering";
 const std::string Options::VERBOSE = "verbose";
 const std::string Options::TPA_USE_QE = "tpa.use-qe";
 const std::string Options::IC3IA_USE_UNSAT_CORE_GENERALIZATION = "ic3ia.unsat-core-generalization";
-const std::string Options::IC3IA_MINIMIZE_REFINEMENT_PREDICATES = "ic3ia.minimize-refinement-predicates";
-const std::string Options::IC3IA_USE_BINARY_REFINEMENT_INTERPOLANTS = "ic3ia.binary-refinement-interpolants";
 const std::string Options::IC3IA_ADD_INITIAL_RESET = "ic3ia.initial-reset";
 const std::string Options::IC3IA_MAKE_SIMPLE_PROPERTY = "ic3ia.make-simple-property";
 const std::string Options::FORCE_TS = "force-ts";
@@ -67,10 +65,6 @@ void printUsage() {
            "--force-ts                      Always encode linear system into transition system (affects BMC and TPA)\n"
            "--ic3ia.unsat-core-generalization[=bool]\n"
            "                                Use unsat-core-only cube generalization in IC3IA (default: true)\n"
-           "--ic3ia.minimize-refinement-predicates[=bool]\n"
-           "                                Minimize interpolant-derived predicates after refinement in IC3IA (default: true)\n"
-           "--ic3ia.binary-refinement-interpolants[=bool]\n"
-           "                                Use binary interpolants in IC3IA refinement instead of path interpolants (default: false)\n"
            "--ic3ia.initial-reset[=bool]\n"
            "                                Add a reset state so IC3IA does not seed from the full init formula (default: true)\n"
            "--ic3ia.make-simple-property[=bool]\n"
@@ -98,8 +92,6 @@ Options CommandLineParser::parse(int argc, char ** argv) {
     int verbose = 0;
     int tpaUseQE = 0;
     int ic3iaUseUnsatCoreGeneralization = 0;
-    int ic3iaMinimizeRefinementPredicates = 0;
-    int ic3iaUseBinaryRefinementInterpolants = 0;
     int ic3iaAddInitialReset = 1;
     int ic3iaMakeSimpleProperty = 0;
     int printVersion = 0;
@@ -120,8 +112,6 @@ Options CommandLineParser::parse(int argc, char ** argv) {
                                     {Options::VERBOSE.c_str(), optional_argument, &verbose, 1},
                                     {Options::TPA_USE_QE.c_str(), optional_argument, &tpaUseQE, 1},
                                     {Options::IC3IA_USE_UNSAT_CORE_GENERALIZATION.c_str(), optional_argument, &ic3iaUseUnsatCoreGeneralization, 1},
-                                    {Options::IC3IA_MINIMIZE_REFINEMENT_PREDICATES.c_str(), optional_argument, &ic3iaMinimizeRefinementPredicates, 1},
-                                    {Options::IC3IA_USE_BINARY_REFINEMENT_INTERPOLANTS.c_str(), optional_argument, &ic3iaUseBinaryRefinementInterpolants, 1},
                                     {Options::IC3IA_ADD_INITIAL_RESET.c_str(), optional_argument, &ic3iaAddInitialReset, 1},
                                     {Options::IC3IA_MAKE_SIMPLE_PROPERTY.c_str(), optional_argument, &ic3iaMakeSimpleProperty, 1},
                                     {Options::PROOF_FORMAT.c_str(), required_argument, nullptr, 'p'},
@@ -157,18 +147,6 @@ Options CommandLineParser::parse(int argc, char ** argv) {
                         ic3iaUseUnsatCoreGeneralization = 0;
                     } else {
                         ic3iaUseUnsatCoreGeneralization = 1;
-                    }
-                } else if (long_options[option_index].flag == &ic3iaMinimizeRefinementPredicates and optarg) {
-                    if (isDisableKeyword(optarg)) {
-                        ic3iaMinimizeRefinementPredicates = 0;
-                    } else {
-                        ic3iaMinimizeRefinementPredicates = 1;
-                    }
-                } else if (long_options[option_index].flag == &ic3iaUseBinaryRefinementInterpolants and optarg) {
-                    if (isDisableKeyword(optarg)) {
-                        ic3iaUseBinaryRefinementInterpolants = 0;
-                    } else {
-                        ic3iaUseBinaryRefinementInterpolants = 1;
                     }
                 } else if (long_options[option_index].flag == &ic3iaAddInitialReset and optarg) {
                     if (isDisableKeyword(optarg)) {
@@ -236,8 +214,6 @@ Options CommandLineParser::parse(int argc, char ** argv) {
     if (forcedCovering) { res.addOption(Options::FORCED_COVERING, "true"); }
     if (tpaUseQE) { res.addOption(Options::TPA_USE_QE, "true"); }
     if (ic3iaUseUnsatCoreGeneralization) { res.addOption(Options::IC3IA_USE_UNSAT_CORE_GENERALIZATION, "true"); }
-    if (ic3iaMinimizeRefinementPredicates) { res.addOption(Options::IC3IA_MINIMIZE_REFINEMENT_PREDICATES, "true"); }
-    if (ic3iaUseBinaryRefinementInterpolants) { res.addOption(Options::IC3IA_USE_BINARY_REFINEMENT_INTERPOLANTS, "true"); }
     res.addOption(Options::IC3IA_ADD_INITIAL_RESET, ic3iaAddInitialReset ? "true" : "false");
     if (ic3iaMakeSimpleProperty) { res.addOption(Options::IC3IA_MAKE_SIMPLE_PROPERTY, "true"); }
     if (forceTS) { res.addOption(Options::FORCE_TS, "true"); }

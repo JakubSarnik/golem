@@ -46,8 +46,6 @@ public:
     static const std::string VERBOSE;
     static const std::string TPA_USE_QE;
     static const std::string IC3IA_USE_UNSAT_CORE_GENERALIZATION;
-    static const std::string IC3IA_MINIMIZE_REFINEMENT_PREDICATES;
-    static const std::string IC3IA_USE_BINARY_REFINEMENT_INTERPOLANTS;
     static const std::string IC3IA_ADD_INITIAL_RESET;
     static const std::string IC3IA_MAKE_SIMPLE_PROPERTY;
     static const std::string FORCE_TS;

@@ -28,10 +28,6 @@ IC3IA::IC3IA(Logic & logic, Options const & options) : logic_(logic) {
     computeWitness = options.getOrDefault(Options::COMPUTE_WITNESS, "") == "true";
     useUnsatCoreGeneralization_ =
     options.getOrDefault(Options::IC3IA_USE_UNSAT_CORE_GENERALIZATION, "true") == "true";
-    minimizeRefinementPredicates_ =
-        options.getOrDefault(Options::IC3IA_MINIMIZE_REFINEMENT_PREDICATES, "true") == "true";
-    useBinaryRefinementInterpolants_ =
-        options.getOrDefault(Options::IC3IA_USE_BINARY_REFINEMENT_INTERPOLANTS, "false") == "true";
     addInitialReset_ =
         options.getOrDefault(Options::IC3IA_ADD_INITIAL_RESET, "true") == "true";
     makeSimpleProperty_ =
@@ -90,7 +86,7 @@ TransitionSystemVerificationResult IC3IA::runIC3(bool resuming) {
                     return {VerificationAnswer::SAFE, buildInvariant(i)};
                 }
             }
-            return {VerificationAnswer::SAFE, logic_.getTerm_true()};
+            throw std::logic_error("IC3IA: propagateClauses reported fixpoint but no empty level was found");
         }
     }
 }
@@ -300,8 +296,7 @@ bool IC3IA::blockObligations(Obligation seed) {
         }
 
         if (obl.level == 0) {
-            // Vacuity check above already proved init ∧ cube SAT,
-            // so reaching level 0 means we have a real counterexample.
+            // reaching level 0 means we have a counterexample.
             cexTrace_.clear();
             Obligation const * cur = &obl;
             while (cur) {
@@ -316,10 +311,6 @@ bool IC3IA::blockObligations(Obligation seed) {
             auto oblPtr = std::make_shared<Obligation>(obl);
             pq.push(Obligation{std::move(cti), obl.level - 1, std::move(oblPtr)});
             pq.push(std::move(obl));
-        } else if (initIntersects(obl.cube)) {
-            // No predecessor, but the cube is in init — push to level 0
-            // so the level-0 handler recognizes it as a real counterexample.
-            pq.push(Obligation{obl.cube, 0, obl.successor});
         } else {
             Cube gen = generalize(obl.cube, obl.level);
             PTRef clause = logic_.mkNot(cubeToFla(gen));
@@ -838,21 +829,25 @@ bool IC3IA::checkAndRefine(std::size_t & outDepth) {
             }
         }
     };
-    for (std::size_t i = 0; i < k; ++i) {
+    {
+        std::vector<ipartitions_t> masks;
+        masks.reserve(k);
         ipartitions_t mask = 0;
-        for (std::size_t j = 0; j <= i; ++j) {
-            opensmt::setbit(mask, static_cast<unsigned>(j));
+        for (std::size_t i = 0; i < k; ++i) {
+            opensmt::setbit(mask, static_cast<unsigned>(i));
+            masks.push_back(mask);
         }
-        std::vector<PTRef> single;
-        itpCtx->getSingleInterpolant(single, mask);
-        if (single.empty()) { continue; }
-        PTRef untimed = untimeToZero(single.front());
-        unshiftedInterpolants.push_back(untimed);
-        absorbAtomsFrom(untimed);
+        vec<PTRef> itps;
+        itpCtx->getPathInterpolants(itps, masks);
+        for (int i = 0; i < itps.size(); ++i) {
+            PTRef untimed = untimeToZero(itps[i]);
+            unshiftedInterpolants.push_back(untimed);
+            absorbAtomsFrom(untimed);
+        }
     }
     auto const interpolationEnd = std::chrono::steady_clock::now();
 
-    if (minimizeRefinementPredicates_) {
+    {
         auto minimized = minimizeRefinementPredicateSet(candidatePredicates, unshiftedInterpolants, k);
         if (verbosity_ > 0 && minimized.size() < candidatePredicates.size()) {
             std::cout << "[IC3IA] Minimized refinement predicates from "
