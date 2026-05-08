@@ -14,8 +14,10 @@
 #include <cassert>
 #include <chrono>
 #include <iostream>
+#include <random>
 #include <sstream>
 #include <stdexcept>
+#include <unordered_set>
 
 namespace golem {
 
@@ -494,67 +496,81 @@ std::vector<PTRef> IC3IA::minimizeRefinementPredicateSet(std::vector<PTRef> cand
                                                          std::size_t depth) const {
     if (candidates.size() <= 1 || unshiftedInterpolants.empty()) { return candidates; }
 
-    SMTSolver solver(logic_, SMTSolver::WitnessProduction::ONLY_UNSAT_CORE);
-    solver.assertProp(concreteInit_);
-    for (std::size_t i = 0; i < depth; ++i) {
-        solver.assertProp(atTime(concreteTrans_, static_cast<unsigned>(i)));
-    }
-    solver.assertProp(atTime(concreteBad_, static_cast<unsigned>(depth)));
+    constexpr int maxIter = 5;
+    constexpr int maxFail = 2;
+    std::mt19937 rng(0xC0FFEEu);
+    int failures = 0;
 
-    TermUtils::substitutions_map subst;
-    std::vector<PTRef> activationLiterals;
-    std::vector<PTRef> abstractionLabels;
-    std::vector<PTRef> guardedDefinitions;
-    activationLiterals.reserve(candidates.size());
-    abstractionLabels.reserve(candidates.size());
-    guardedDefinitions.reserve(candidates.size());
+    for (int iter = 0; iter < maxIter; ++iter) {
+        if (iter > 0) { std::shuffle(candidates.begin(), candidates.end(), rng); }
 
-    for (std::size_t i = 0; i < candidates.size(); ++i) {
-        std::string suffix = std::to_string(i);
-        PTRef act = logic_.mkBoolVar((".ic3ia_refpred_act_" + suffix).c_str());
-        PTRef lbl = logic_.mkBoolVar((".ic3ia_refpred_lbl_" + suffix).c_str());
-        activationLiterals.push_back(act);
-        abstractionLabels.push_back(lbl);
-        subst[candidates[i]] = lbl;
-        subst[logic_.mkNot(candidates[i])] = logic_.mkNot(lbl);
-    }
-
-    TermUtils termUtils(logic_);
-    for (std::size_t i = 0; i < unshiftedInterpolants.size(); ++i) {
-        PTRef abstractedInterpolant = termUtils.varSubstitute(unshiftedInterpolants[i], subst);
-        solver.assertProp(atTime(abstractedInterpolant, static_cast<unsigned>(i + 1)));
-    }
-
-    for (std::size_t i = 0; i < candidates.size(); ++i) {
-        vec<PTRef> eqs;
-        for (std::size_t step = 0; step < unshiftedInterpolants.size(); ++step) {
-            eqs.push(logic_.mkEq(atTime(abstractionLabels[i], static_cast<unsigned>(step + 1)),
-                                 atTime(candidates[i], static_cast<unsigned>(step + 1))));
+        SMTSolver solver(logic_, SMTSolver::WitnessProduction::ONLY_UNSAT_CORE);
+        solver.assertProp(concreteInit_);
+        for (std::size_t i = 0; i < depth; ++i) {
+            solver.assertProp(atTime(concreteTrans_, static_cast<unsigned>(i)));
         }
-        PTRef definition = eqs.size() == 1 ? eqs[0] : logic_.mkAnd(eqs);
-        PTRef guarded = logic_.mkOr(logic_.mkNot(activationLiterals[i]), definition);
-        guardedDefinitions.push_back(guarded);
-        solver.assertProp(guarded);
-        solver.assertProp(activationLiterals[i]);
-    }
+        solver.assertProp(atTime(concreteBad_, static_cast<unsigned>(depth)));
 
-    if (solver.check() != SMTSolver::Answer::UNSAT) { return candidates; }
+        TermUtils::substitutions_map subst;
+        std::vector<PTRef> activationLiterals;
+        std::vector<PTRef> abstractionLabels;
+        std::vector<PTRef> guardedDefinitions;
+        activationLiterals.reserve(candidates.size());
+        abstractionLabels.reserve(candidates.size());
+        guardedDefinitions.reserve(candidates.size());
 
-    auto core = solver.getCoreSolver().getUnsatCore();
-    std::vector<PTRef> kept;
-    kept.reserve(candidates.size());
-    for (std::size_t i = 0; i < candidates.size(); ++i) {
-        bool inCore = false;
-        for (PTRef t : core->getTerms()) {
-            if (t == activationLiterals[i] || t == guardedDefinitions[i]) {
-                inCore = true;
-                break;
+        for (std::size_t i = 0; i < candidates.size(); ++i) {
+            std::string suffix = std::to_string(i);
+            PTRef act = logic_.mkBoolVar((".ic3ia_refpred_act_" + suffix).c_str());
+            PTRef lbl = logic_.mkBoolVar((".ic3ia_refpred_lbl_" + suffix).c_str());
+            activationLiterals.push_back(act);
+            abstractionLabels.push_back(lbl);
+            subst[candidates[i]] = lbl;
+            subst[logic_.mkNot(candidates[i])] = logic_.mkNot(lbl);
+        }
+
+        TermUtils termUtils(logic_);
+        for (std::size_t i = 0; i < unshiftedInterpolants.size(); ++i) {
+            PTRef abstractedInterpolant = termUtils.varSubstitute(unshiftedInterpolants[i], subst);
+            solver.assertProp(atTime(abstractedInterpolant, static_cast<unsigned>(i + 1)));
+        }
+
+        for (std::size_t i = 0; i < candidates.size(); ++i) {
+            vec<PTRef> eqs;
+            for (std::size_t step = 0; step < unshiftedInterpolants.size(); ++step) {
+                eqs.push(logic_.mkEq(atTime(abstractionLabels[i], static_cast<unsigned>(step + 1)),
+                                     atTime(candidates[i], static_cast<unsigned>(step + 1))));
+            }
+            PTRef definition = eqs.size() == 1 ? eqs[0] : logic_.mkAnd(eqs);
+            PTRef guarded = logic_.mkOr(logic_.mkNot(activationLiterals[i]), definition);
+            guardedDefinitions.push_back(guarded);
+            solver.assertProp(guarded);
+            solver.assertProp(activationLiterals[i]);
+        }
+
+        if (solver.check() != SMTSolver::Answer::UNSAT) { return candidates; }
+
+        auto core = solver.getCoreSolver().getUnsatCore();
+        std::unordered_set<uint32_t> coreSet;
+        for (PTRef t : core->getTerms()) { coreSet.insert(t.x); }
+
+        std::vector<PTRef> kept;
+        kept.reserve(candidates.size());
+        for (std::size_t i = 0; i < candidates.size(); ++i) {
+            if (coreSet.count(activationLiterals[i].x) || coreSet.count(guardedDefinitions[i].x)) {
+                kept.push_back(candidates[i]);
             }
         }
-        if (inCore) { kept.push_back(candidates[i]); }
+
+        if (kept.empty()) { return candidates; }
+        if (kept.size() >= candidates.size()) {
+            if (++failures >= maxFail) { return candidates; }
+            continue;
+        }
+        candidates = std::move(kept);
     }
 
-    return kept.empty() ? candidates : kept;
+    return candidates;
 }
 
 bool IC3IA::addPredicate(PTRef pred) {
@@ -820,11 +836,12 @@ bool IC3IA::checkAndRefine(std::size_t & outDepth) {
         if (subst.empty()) { return fla; }
         return TermUtils(logic_).varSubstitute(fla, subst);
     };
+    std::unordered_set<uint32_t> candidateSet;
     auto absorbAtomsFrom = [&](PTRef itp) {
         std::vector<PTRef> atoms;
         collectAtoms(itp, atoms);
         for (PTRef a : atoms) {
-            if (std::find(candidatePredicates.begin(), candidatePredicates.end(), a) == candidatePredicates.end()) {
+            if (candidateSet.insert(a.x).second) {
                 candidatePredicates.push_back(a);
             }
         }

@@ -213,7 +213,7 @@ Options CommandLineParser::parse(int argc, char ** argv) {
     if (validate || computeWitness || printWitness) { res.addOption(Options::COMPUTE_WITNESS, "true"); }
     if (forcedCovering) { res.addOption(Options::FORCED_COVERING, "true"); }
     if (tpaUseQE) { res.addOption(Options::TPA_USE_QE, "true"); }
-    if (ic3iaUseUnsatCoreGeneralization) { res.addOption(Options::IC3IA_USE_UNSAT_CORE_GENERALIZATION, "true"); }
+    res.addOption(Options::IC3IA_USE_UNSAT_CORE_GENERALIZATION, ic3iaUseUnsatCoreGeneralization ? "true" : "false");
     res.addOption(Options::IC3IA_ADD_INITIAL_RESET, ic3iaAddInitialReset ? "true" : "false");
     if (ic3iaMakeSimpleProperty) { res.addOption(Options::IC3IA_MAKE_SIMPLE_PROPERTY, "true"); }
     if (forceTS) { res.addOption(Options::FORCE_TS, "true"); }
