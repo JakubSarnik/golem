@@ -157,13 +157,13 @@ private:
     void  extendAbstractSystem();
     PTRef concreteInvariant(PTRef abstractInv) const;
 
-    // --- Persistent solvers for IC3 queries ---
-    std::unique_ptr<SMTSolver> initSolver_;
-    std::unique_ptr<SMTSolver> transSolver_;
-
-    // Activation literal guarding concreteTrans_ in transSolver_. Asserted true
-    // for queries that need the transition relation (predecessor, propagation),
-    // and false for queries about a single state (hasBadState).
+    // --- Persistent solver for IC3 queries ---
+    // One incremental solver carries concreteInit_ / concreteTrans_ (each
+    // guarded by an activation literal) plus the accumulated label-defs and
+    // next-label-defs. Each query toggles initAct_ / transAct_ to select
+    // which parts are active.
+    std::unique_ptr<SMTSolver> solver_;
+    PTRef initAct_{PTRef_Undef};
     PTRef transAct_{PTRef_Undef};
 
     // --- Concrete CEGAR check ---

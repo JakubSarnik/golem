@@ -48,10 +48,12 @@ TransitionSystemVerificationResult IC3IA::runIC3(bool resuming) {
     if (!resuming) {
         // Base check: Init ∧ bad SAT → immediately unsafe.
         {
-            initSolver_->push();
-            initSolver_->assertProp(bad_);
-            auto const res = initSolver_->check();
-            initSolver_->pop();
+            solver_->push();
+            solver_->assertProp(initAct_);
+            solver_->assertProp(logic_.mkNot(transAct_));
+            solver_->assertProp(bad_);
+            auto const res = solver_->check();
+            solver_->pop();
             if (res == SMTSolver::Answer::SAT) {
                 if (verbosity_ > 0) { std::cout << "[IC3] Initial states satisfy bad\n"; }
                 return {VerificationAnswer::UNSAFE, 0u};
@@ -152,37 +154,39 @@ IC3IA::Cube IC3IA::modelToCube(std::shared_ptr<Model> const & model,
 //=============================================================================
 
 bool IC3IA::initIntersects(Cube const & cube) const {
-    initSolver_->push();
-    initSolver_->assertProp(cubeToFla(cube));
-    auto const res = initSolver_->check();
-    initSolver_->pop();
+    solver_->push();
+    solver_->assertProp(initAct_);
+    solver_->assertProp(logic_.mkNot(transAct_));
+    solver_->assertProp(cubeToFla(cube));
+    auto const res = solver_->check();
+    solver_->pop();
     return res == SMTSolver::Answer::SAT;
 }
 
 bool IC3IA::hasBadState(Cube & outCube) const {
     // Disable the trans relation via transAct_ so the query is over a single
     // current state (label-defs still apply, giving labels their meaning).
-    transSolver_->push();
-    transSolver_->assertProp(logic_.mkNot(transAct_));
-    transSolver_->assertProp(getF(depth_));
-    transSolver_->assertProp(bad_);
-    auto const res = transSolver_->check();
+    solver_->push();
+    solver_->assertProp(logic_.mkNot(transAct_));
+    solver_->assertProp(getF(depth_));
+    solver_->assertProp(bad_);
+    auto const res = solver_->check();
     bool const sat = res == SMTSolver::Answer::SAT;
-    if (sat) { outCube = modelToCube(transSolver_->getModel(), stateVars_); }
-    transSolver_->pop();
+    if (sat) { outCube = modelToCube(solver_->getModel(), stateVars_); }
+    solver_->pop();
     return sat;
 }
 
 bool IC3IA::hasPredecessorUnder(PTRef frameFormula, Cube const & cube,
                                  Cube & outCTI) const {
-    transSolver_->push();
-    transSolver_->assertProp(transAct_);
-    transSolver_->assertProp(frameFormula);
-    transSolver_->assertProp(prime(cubeToFla(cube)));
-    auto const res = transSolver_->check();
+    solver_->push();
+    solver_->assertProp(transAct_);
+    solver_->assertProp(frameFormula);
+    solver_->assertProp(prime(cubeToFla(cube)));
+    auto const res = solver_->check();
     bool const sat = res == SMTSolver::Answer::SAT;
-    if (sat) { outCTI = modelToCube(transSolver_->getModel(), stateVars_); }
-    transSolver_->pop();
+    if (sat) { outCTI = modelToCube(solver_->getModel(), stateVars_); }
+    solver_->pop();
     return sat;
 }
 
@@ -283,25 +287,28 @@ bool IC3IA::blockObligations(Obligation seed) {
         Obligation obl = pq.top();
         pq.pop();
 
+        // Sanity check: skip obligations whose cube is no longer reachable
+        // in F[level] (e.g., already blocked by a pushed clause).
         {
-            SMTSolver solver(logic_, SMTSolver::WitnessProduction::NONE);
-            solver.assertProp(getF(obl.level));
-            solver.assertProp(cubeToFla(obl.cube));
-            if (solver.check() == SMTSolver::Answer::UNSAT) { continue; }
+            solver_->push();
+            solver_->assertProp(logic_.mkNot(transAct_));
+            solver_->assertProp(getF(obl.level));
+            solver_->assertProp(cubeToFla(obl.cube));
+            auto const res = solver_->check();
+            solver_->pop();
+            if (res == SMTSolver::Answer::UNSAT) { continue; }
         }
 
         if (obl.level == 0) {
-            if (initIntersects(obl.cube)) {
-                cexTrace_.clear();
-                Obligation const * cur = &obl;
-                while (cur) {
-                    cexTrace_.push_back(cur->cube);
-                    cur = cur->successor.get();
-                }
-                return false;
+            // Vacuity check above already proved init ∧ cube SAT,
+            // so reaching level 0 means we have a real counterexample.
+            cexTrace_.clear();
+            Obligation const * cur = &obl;
+            while (cur) {
+                cexTrace_.push_back(cur->cube);
+                cur = cur->successor.get();
             }
-            addClause(logic_.mkNot(cubeToFla(obl.cube)), 1u);
-            continue;
+            return false;
         }
 
         Cube cti;
@@ -335,12 +342,12 @@ bool IC3IA::propagateClauses() {
         for (auto & c : clauses_) {
             if (c.level != i) { continue; }
             PTRef negClausePrimed = prime(logic_.mkNot(c.fla));
-            transSolver_->push();
-            transSolver_->assertProp(transAct_);
-            transSolver_->assertProp(getF(i));
-            transSolver_->assertProp(negClausePrimed);
-            auto const res = transSolver_->check();
-            transSolver_->pop();
+            solver_->push();
+            solver_->assertProp(transAct_);
+            solver_->assertProp(getF(i));
+            solver_->assertProp(negClausePrimed);
+            auto const res = solver_->check();
+            solver_->pop();
             if (res == SMTSolver::Answer::UNSAT) {
                 c.level = i + 1;
             }
@@ -682,11 +689,11 @@ void IC3IA::initializeAbstractSystem() {
     nextStateVars_.clear();
     numAssertedPreds_ = 0;
 
-    initSolver_  = std::make_unique<SMTSolver>(logic_, SMTSolver::WitnessProduction::NONE);
-    transSolver_ = std::make_unique<SMTSolver>(logic_, SMTSolver::WitnessProduction::ONLY_MODEL);
-    initSolver_->assertProp(concreteInit_);
+    solver_ = std::make_unique<SMTSolver>(logic_, SMTSolver::WitnessProduction::ONLY_MODEL);
+    initAct_  = logic_.mkBoolVar(".ic3ia_init_act");
     transAct_ = logic_.mkBoolVar(".ic3ia_trans_act");
-    transSolver_->assertProp(logic_.mkOr(logic_.mkNot(transAct_), concreteTrans_));
+    solver_->assertProp(logic_.mkOr(logic_.mkNot(initAct_),  concreteInit_));
+    solver_->assertProp(logic_.mkOr(logic_.mkNot(transAct_), concreteTrans_));
 
     extendAbstractSystem();
 }
@@ -713,11 +720,10 @@ void IC3IA::extendAbstractSystem() {
     for (int i = 0; i < newNextDefParts.size(); ++i) { transParts.push(newNextDefParts[i]); }
     trans_ = logic_.mkAnd(transParts);
 
-    // Mirror the new conjuncts into the persistent query solvers.
-    initSolver_->assertProp(newLabelDefs);
-    transSolver_->assertProp(newLabelDefs);
+    // Mirror the new conjuncts into the persistent query solver.
+    solver_->assertProp(newLabelDefs);
     for (int i = 0; i < newNextDefParts.size(); ++i) {
-        transSolver_->assertProp(newNextDefParts[i]);
+        solver_->assertProp(newNextDefParts[i]);
     }
 
     stateVars_     = predLabels_;
