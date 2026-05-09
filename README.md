@@ -92,7 +92,6 @@ The following are available:
 
 - `--ic3ia.unsat-core-generalization` (default: `true`): when dropping literals from a bad cube, use an unsat core query to identify a minimal subset to keep, rather than dropping them one by one with separate queries.
 - `--ic3ia.initial-reset` (default: `true`): add a reset state and encodes the concrete init as the first transition step, to avoid starting with the initial predicates.
-- `--ic3ia.make-simple-property` (default: `false`): replace the bad formula with a single fresh predicate, so the abstract bad becomes a single literal.
 
 #### Running multiple engines in parallel
 

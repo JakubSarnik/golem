@@ -25,7 +25,6 @@ const std::string Options::VERBOSE = "verbose";
 const std::string Options::TPA_USE_QE = "tpa.use-qe";
 const std::string Options::IC3IA_USE_UNSAT_CORE_GENERALIZATION = "ic3ia.unsat-core-generalization";
 const std::string Options::IC3IA_ADD_INITIAL_RESET = "ic3ia.initial-reset";
-const std::string Options::IC3IA_MAKE_SIMPLE_PROPERTY = "ic3ia.make-simple-property";
 const std::string Options::FORCE_TS = "force-ts";
 const std::string Options::SIMPLIFY_NESTED = "simplify-nested";
 const std::string Options::PROOF_FORMAT = "proof-format";
@@ -67,8 +66,6 @@ void printUsage() {
            "                                Use unsat-core-only cube generalization in IC3IA (default: true)\n"
            "--ic3ia.initial-reset[=bool]\n"
            "                                Add a reset state so IC3IA does not seed from the full init formula (default: true)\n"
-           "--ic3ia.make-simple-property[=bool]\n"
-           "                                Replace the bad formula with a single fresh predicate in IC3IA (default: false)\n"
            "--termination-backend <name>    Select backend algorithm for termination problems:\n"
            "                                  lasso-finder - searches for lasso in the system\n"
            "                                  nontermination-via-safety - gradually eliminates terminating traces from the system\n"
@@ -93,7 +90,6 @@ Options CommandLineParser::parse(int argc, char ** argv) {
     int tpaUseQE = 0;
     int ic3iaUseUnsatCoreGeneralization = 0;
     int ic3iaAddInitialReset = 1;
-    int ic3iaMakeSimpleProperty = 0;
     int printVersion = 0;
     int forceTS = 0;
     int simplifyNested = 0;
@@ -113,7 +109,6 @@ Options CommandLineParser::parse(int argc, char ** argv) {
                                     {Options::TPA_USE_QE.c_str(), optional_argument, &tpaUseQE, 1},
                                     {Options::IC3IA_USE_UNSAT_CORE_GENERALIZATION.c_str(), optional_argument, &ic3iaUseUnsatCoreGeneralization, 1},
                                     {Options::IC3IA_ADD_INITIAL_RESET.c_str(), optional_argument, &ic3iaAddInitialReset, 1},
-                                    {Options::IC3IA_MAKE_SIMPLE_PROPERTY.c_str(), optional_argument, &ic3iaMakeSimpleProperty, 1},
                                     {Options::PROOF_FORMAT.c_str(), required_argument, nullptr, 'p'},
                                     {Options::FORCE_TS.c_str(), no_argument, &forceTS, 1},
                                     {Options::SIMPLIFY_NESTED.c_str(), no_argument, &simplifyNested, 1},
@@ -153,12 +148,6 @@ Options CommandLineParser::parse(int argc, char ** argv) {
                         ic3iaAddInitialReset = 0;
                     } else {
                         ic3iaAddInitialReset = 1;
-                    }
-                } else if (long_options[option_index].flag == &ic3iaMakeSimpleProperty and optarg) {
-                    if (isDisableKeyword(optarg)) {
-                        ic3iaMakeSimpleProperty = 0;
-                    } else {
-                        ic3iaMakeSimpleProperty = 1;
                     }
                 } else if (long_options[option_index].flag == &lraItpAlg) {
                     assert(optarg);
@@ -215,7 +204,6 @@ Options CommandLineParser::parse(int argc, char ** argv) {
     if (tpaUseQE) { res.addOption(Options::TPA_USE_QE, "true"); }
     res.addOption(Options::IC3IA_USE_UNSAT_CORE_GENERALIZATION, ic3iaUseUnsatCoreGeneralization ? "true" : "false");
     res.addOption(Options::IC3IA_ADD_INITIAL_RESET, ic3iaAddInitialReset ? "true" : "false");
-    if (ic3iaMakeSimpleProperty) { res.addOption(Options::IC3IA_MAKE_SIMPLE_PROPERTY, "true"); }
     if (forceTS) { res.addOption(Options::FORCE_TS, "true"); }
     if (simplifyNested) { res.addOption(Options::SIMPLIFY_NESTED, "true"); }
     res.addOption(Options::LRA_ITP_ALG, std::to_string(lraItpAlg));

@@ -32,8 +32,6 @@ IC3IA::IC3IA(Logic & logic, Options const & options) : logic_(logic) {
     options.getOrDefault(Options::IC3IA_USE_UNSAT_CORE_GENERALIZATION, "true") == "true";
     addInitialReset_ =
         options.getOrDefault(Options::IC3IA_ADD_INITIAL_RESET, "true") == "true";
-    makeSimpleProperty_ =
-        options.getOrDefault(Options::IC3IA_MAKE_SIMPLE_PROPERTY, "false") == "true";
 }
 
 //=============================================================================
@@ -373,11 +371,6 @@ TransitionSystemVerificationResult IC3IA::solve(TransitionSystem const & system)
     concreteStateVars_    = system.getStateVars();
     concreteNextStateVars_= system.getNextStateVars();
 
-    simplePropOrigBad_ = PTRef_Undef;
-    simplePropVar_ = PTRef_Undef;
-    if (makeSimpleProperty_) {
-        applySimpleProperty();
-    }
     if (addInitialReset_) {
         applyInitialReset();
     }
@@ -409,11 +402,6 @@ TransitionSystemVerificationResult IC3IA::solve(TransitionSystem const & system)
                 PTRef resetVar = tm.getVarVersionZero("ic3ia_reset", logic_.getSort_bool());
                 TermUtils::substitutions_map subst;
                 subst[resetVar] = logic_.getTerm_false();
-                concreteInv = TermUtils(logic_).varSubstitute(concreteInv, subst);
-            }
-            if (makeSimpleProperty_ && simplePropVar_ != PTRef_Undef) {
-                TermUtils::substitutions_map subst;
-                subst[simplePropVar_] = simplePropOrigBad_;
                 concreteInv = TermUtils(logic_).varSubstitute(concreteInv, subst);
             }
             return {VerificationAnswer::SAFE, concreteInv};
@@ -591,34 +579,6 @@ bool IC3IA::addPredicate(PTRef pred) {
     predLabels_.push_back(lCurr);
     predLabelsNext_.push_back(lNext);
     return true;
-}
-
-void IC3IA::applySimpleProperty() {
-    // Skip if bad is already a single Boolean state var.
-    if (logic_.isVar(concreteBad_) && logic_.hasSortBool(concreteBad_)) {
-        return;
-    }
-    TimeMachine tm{logic_};
-    PTRef p     = tm.getVarVersionZero("ic3ia_simpleprop", logic_.getSort_bool());
-    PTRef pNext = tm.sendVarThroughTime(p, 1);
-
-    PTRef oldInit  = concreteInit_;
-    PTRef oldTrans = concreteTrans_;
-    PTRef oldBad   = concreteBad_;
-    PTRef badNext  = atTime(oldBad, 1);
-
-    concreteInit_  = logic_.mkAnd(oldInit, logic_.mkEq(p, oldBad));
-    concreteTrans_ = logic_.mkAnd({oldTrans, logic_.mkEq(p, oldBad), logic_.mkEq(pNext, badNext)});
-    concreteBad_   = p;
-    concreteStateVars_.push_back(p);
-    concreteNextStateVars_.push_back(pNext);
-
-    simplePropOrigBad_ = oldBad;
-    simplePropVar_     = p;
-
-    if (verbosity_ > 0) {
-        std::cout << "[IC3IA] Replaced property with single state var\n";
-    }
 }
 
 void IC3IA::applyInitialReset() {

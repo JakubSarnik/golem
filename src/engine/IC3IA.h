@@ -70,12 +70,6 @@ private:
     int       verbosity_{0};
     bool      useUnsatCoreGeneralization_{true};
     bool      addInitialReset_{false};
-    bool      makeSimpleProperty_{false};
-
-    // When makeSimpleProperty_ is on, the original bad formula is stashed here
-    // so the SAFE invariant can be translated back (substitute p -> origBad).
-    PTRef     simplePropOrigBad_{PTRef_Undef};
-    PTRef     simplePropVar_{PTRef_Undef};
 
     // Set before calling runIC3(); setupAbstractSystem() fills these with abstract formulas.
     PTRef                init_{PTRef_Undef};
@@ -140,7 +134,6 @@ private:
                                                       std::size_t depth) const;
     bool addPredicate(PTRef pred);
     void applyInitialReset();
-    void applySimpleProperty();
     void initializePredicates();
 
     // --- Abstract system construction ---
