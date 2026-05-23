@@ -9,6 +9,7 @@
 #include "ArgBasedEngine.h"
 #include "Bmc.h"
 #include "DAR.h"
+#include "IC3IA.h"
 #include "IMC.h"
 #include "ImplicitTPA.h"
 #include "Kind.h"
@@ -21,7 +22,9 @@
 
 namespace golem {
 std::unique_ptr<Engine> EngineFactory::getEngine(std::string_view engine) && {
-    if (engine == "spacer") {
+    if (engine == "ic3ia") {
+        return std::make_unique<IC3IA>(logic, options);
+    } else if (engine == "spacer") {
         return std::make_unique<Spacer>(logic, options);
     } else if (engine == TPAEngine::TPA) {
         return std::make_unique<TPAEngine>(logic, options, TPACore::BASIC);
