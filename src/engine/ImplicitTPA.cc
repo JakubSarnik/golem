@@ -13,19 +13,33 @@
 #include <utils/StdUtils.h>
 
 #include "graph/ChcGraphBuilder.h"
+#include "transformers/SingleLoopTransformation.h"
 
 namespace golem {
 VerificationResult ImplicitTPA::solve(ChcDirectedGraph const & graph) {
     if (isTrivial(graph)) { return solveTrivial(graph); }
     if (logic.hasArrays()) { return VerificationResult{VerificationAnswer::UNKNOWN}; }
+
     if (isTransitionSystem(graph)) {
         auto ts = toTransitionSystem(graph);
         return reencodeAndSolve(std::move(ts));
     }
-    if (isTransitionSystemDAG(graph)) {
+
+    if (isTransitionSystemDAG(graph) && !options.hasOption(Options::FORCE_TS)) {
         return reencodeAndSolve(graph);
     }
-    return VerificationResult{VerificationAnswer::UNKNOWN};
+
+    // Otherwise, convert the graph to a transition system and try to solve it
+    // using the transition system encoding.
+
+    SingleLoopTransformation transformation;
+
+    auto [ts, backtranslator] = transformation.transform(graph);
+    assert(ts);
+
+    auto res = reencodeAndSolve(std::move(ts));
+
+    return computeWitness ? backtranslator->translate(translateWitness(res)) : VerificationResult{res.getAnswer()};
 }
 
 VerificationResult ImplicitTPA::reencodeAndSolve(std::unique_ptr<TransitionSystem> ts) {
@@ -79,10 +93,17 @@ VerificationResult ImplicitTPA::reencodeAndSolve(std::unique_ptr<TransitionSyste
     auto engine = Spacer(logic, options);
     auto res = engine.solve(*newGraph);
     return res;
+
+    // TODO: Compute the witness!
 }
 
 VerificationResult ImplicitTPA::reencodeAndSolve(ChcDirectedGraph const & graph) {
     ChcSystem newSystem;
     return VerificationResult{VerificationAnswer::UNKNOWN};
+}
+
+TransitionSystemVerificationResult ImplicitTPA::translateWitness(const VerificationResult & res) {
+    // TODO: How to do this? TransitionSystemVerificationResult wants a state
+    //       invariant or an unrolling level.
 }
 }
