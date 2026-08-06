@@ -22,7 +22,7 @@ private:
     VerificationResult reencodeAndSolve(std::unique_ptr<TransitionSystem> ts);
     VerificationResult reencodeAndSolve(ChcDirectedGraph const & graph);
 
-    std::unique_ptr<ChcDirectedHyperGraph> reencodeTransitionSystem(const TransitionSystem & ts) const;
+    std::unique_ptr<ChcDirectedHyperGraph> reencodeTransitionSystem(const TransitionSystem & ts);
 
     VerificationResult runSpacer(const ChcDirectedHyperGraph & graph);
 

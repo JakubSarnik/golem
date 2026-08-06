@@ -60,7 +60,7 @@ VerificationResult ImplicitTPA::reencodeAndSolve(ChcDirectedGraph const & graph)
     return VerificationResult{VerificationAnswer::UNKNOWN}; // TODO
 }
 
-std::unique_ptr<ChcDirectedHyperGraph> ImplicitTPA::reencodeTransitionSystem(const TransitionSystem & ts) const {
+std::unique_ptr<ChcDirectedHyperGraph> ImplicitTPA::reencodeTransitionSystem(const TransitionSystem & ts) {
     ChcSystem newSystem;
 
     const SymRef transitionHole = [&] {
