@@ -16,9 +16,15 @@
 #include "transformers/SingleLoopTransformation.h"
 
 namespace golem {
+
 VerificationResult ImplicitTPA::solve(ChcDirectedGraph const & graph) {
-    if (isTrivial(graph)) { return solveTrivial(graph); }
-    if (logic.hasArrays()) { return VerificationResult{VerificationAnswer::UNKNOWN}; }
+    if (isTrivial(graph)) {
+        return solveTrivial(graph);
+    }
+
+    if (logic.hasArrays()) {
+        return VerificationResult{VerificationAnswer::UNKNOWN};
+    }
 
     if (isTransitionSystem(graph)) {
         auto ts = toTransitionSystem(graph);
@@ -106,4 +112,5 @@ TransitionSystemVerificationResult ImplicitTPA::translateWitness(const Verificat
     // TODO: How to do this? TransitionSystemVerificationResult wants a state
     //       invariant or an unrolling level.
 }
+
 }
