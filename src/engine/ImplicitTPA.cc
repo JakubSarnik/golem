@@ -62,17 +62,21 @@ VerificationResult ImplicitTPA::reencodeAndSolve(ChcDirectedGraph const & graph)
 
 std::unique_ptr<ChcDirectedHyperGraph> ImplicitTPA::reencodeTransitionSystem(const TransitionSystem & ts) const {
     ChcSystem newSystem;
-    std::vector<SRef> args;
 
-    for (PTRef const var : ts.getStateVars()) {
-        args.push_back(logic.getSortRef(var));
-    }
+    const SymRef transitionHole = [&] {
+        std::vector<SRef> args;
 
-    for (PTRef const var : ts.getStateVars()) {
-        args.push_back(logic.getSortRef(var));
-    }
+        for (PTRef const var : ts.getStateVars()) {
+            args.push_back(logic.getSortRef(var));
+        }
 
-    SymRef const transitionHole = logic.declareFun("implicit_tpa_tr", logic.getSort_bool(), args);
+        for (PTRef const var : ts.getStateVars()) {
+            args.push_back(logic.getSortRef(var));
+        }
+
+        return logic.declareFun("implicit_tpa_tr", logic.getSort_bool(), args);
+    }();
+
     newSystem.addUninterpretedPredicate(transitionHole);
 
     auto const stateVars = ts.getStateVars();
@@ -113,6 +117,28 @@ std::unique_ptr<ChcDirectedHyperGraph> ImplicitTPA::reencodeTransitionSystem(con
             .interpretedPart = {logic.mkAnd(ts.getInit(), TimeMachine(logic).sendFlaThroughTime(ts.getQuery(), 1))},
             .uninterpretedPart = {UninterpretedPredicate{logic.mkUninterpFun(transitionHole, stateVars + nextStateVars)}}}
     );
+
+    // Compute a state invariant as well
+    const SymRef stateHole = [&] {
+        std::vector<SRef> args;
+
+        for (PTRef const var : ts.getStateVars()) {
+            args.push_back(logic.getSortRef(var));
+        }
+
+        return logic.declareFun("implicit_tpa_inv", logic.getSort_bool(), args);
+    }();
+
+    newSystem.addUninterpretedPredicate(stateHole);
+
+    // Inv(X') <- Init(X) /\ TrInv(X, X')
+    newSystem.addClause(
+        ChcHead{UninterpretedPredicate(logic.mkUninterpFun(stateHole, nextStateVars))},
+        ChcBody{
+            .interpretedPart = {ts.getInit()},
+            .uninterpretedPart = {UninterpretedPredicate(logic.mkUninterpFun(transitionHole, stateVars + nextStateVars))}
+        }
+    ); // TODO: Think about the inductivity of this invariant
 
     auto normalizedSystem = Normalizer(logic).normalize(newSystem);
 
