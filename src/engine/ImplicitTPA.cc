@@ -111,6 +111,8 @@ VerificationResult ImplicitTPA::reencodeAndSolve(ChcDirectedGraph const & graph)
 TransitionSystemVerificationResult ImplicitTPA::translateWitness(const VerificationResult & res) {
     // TODO: How to do this? TransitionSystemVerificationResult wants a state
     //       invariant or an unrolling level.
+
+    return TransitionSystemVerificationResult{};
 }
 
 }
