@@ -49,18 +49,34 @@ VerificationResult ImplicitTPA::solve(ChcDirectedGraph const & graph) {
 }
 
 VerificationResult ImplicitTPA::reencodeAndSolve(std::unique_ptr<TransitionSystem> ts) {
+    assert(ts);
+    const auto newGraph = reencodeTransitionSystem(*ts);
+
+    assert(newGraph);
+    return runSpacer(*newGraph);
+}
+
+VerificationResult ImplicitTPA::reencodeAndSolve(ChcDirectedGraph const & graph) {
+    return VerificationResult{VerificationAnswer::UNKNOWN}; // TODO
+}
+
+std::unique_ptr<ChcDirectedHyperGraph> ImplicitTPA::reencodeTransitionSystem(const TransitionSystem & ts) const {
     ChcSystem newSystem;
     std::vector<SRef> args;
-    for (PTRef const var : ts->getStateVars()) {
+
+    for (PTRef const var : ts.getStateVars()) {
         args.push_back(logic.getSortRef(var));
     }
-    for (PTRef const var : ts->getStateVars()) {
+
+    for (PTRef const var : ts.getStateVars()) {
         args.push_back(logic.getSortRef(var));
     }
+
     SymRef const transitionHole = logic.declareFun("implicit_tpa_tr", logic.getSort_bool(), args);
     newSystem.addUninterpretedPredicate(transitionHole);
-    auto const stateVars = ts->getStateVars();
-    auto const nextStateVars = ts->getNextStateVars();
+
+    auto const stateVars = ts.getStateVars();
+    auto const nextStateVars = ts.getNextStateVars();
     auto const nextNextStateVars = [&]() {
         auto res = stateVars;
         for (PTRef & var : res) {
@@ -68,16 +84,19 @@ VerificationResult ImplicitTPA::reencodeAndSolve(std::unique_ptr<TransitionSyste
         }
         return res;
     }();
+
     // transition invariant includes identity
     newSystem.addClause(
         ChcHead{UninterpretedPredicate{logic.mkUninterpFun(transitionHole, stateVars + stateVars)}},
         ChcBody{.interpretedPart = {logic.getTerm_true()}, .uninterpretedPart = {}}
     );
+
     // transition invariant includes Tr
     newSystem.addClause(
         ChcHead{UninterpretedPredicate{logic.mkUninterpFun(transitionHole, stateVars + nextStateVars)}},
-        ChcBody{.interpretedPart = {ts->getTransition()}, .uninterpretedPart = {}}
+        ChcBody{.interpretedPart = {ts.getTransition()}, .uninterpretedPart = {}}
     );
+
     // transition invariant is transitive
     newSystem.addClause(
         ChcHead{UninterpretedPredicate{logic.mkUninterpFun(transitionHole, stateVars + nextNextStateVars)}},
@@ -86,26 +105,28 @@ VerificationResult ImplicitTPA::reencodeAndSolve(std::unique_ptr<TransitionSyste
             UninterpretedPredicate{logic.mkUninterpFun(transitionHole, nextStateVars + nextNextStateVars)},
         }}
     );
+
     // transition invariant is safe
     newSystem.addClause(
         ChcHead{UninterpretedPredicate{logic.getTerm_false()}},
         ChcBody{
-            .interpretedPart = {logic.mkAnd(ts->getInit(), TimeMachine(logic).sendFlaThroughTime(ts->getQuery(), 1))},
+            .interpretedPart = {logic.mkAnd(ts.getInit(), TimeMachine(logic).sendFlaThroughTime(ts.getQuery(), 1))},
             .uninterpretedPart = {UninterpretedPredicate{logic.mkUninterpFun(transitionHole, stateVars + nextStateVars)}}}
     );
-    auto normalizedSystem = Normalizer(logic).normalize(newSystem);
-    auto newGraph = ChcGraphBuilder(logic).buildGraph(normalizedSystem);
-    Options options;
-    auto engine = Spacer(logic, options);
-    auto res = engine.solve(*newGraph);
-    return res;
 
-    // TODO: Compute the witness!
+    auto normalizedSystem = Normalizer(logic).normalize(newSystem);
+
+    return ChcGraphBuilder(logic).buildGraph(normalizedSystem);
 }
 
-VerificationResult ImplicitTPA::reencodeAndSolve(ChcDirectedGraph const & graph) {
-    ChcSystem newSystem;
-    return VerificationResult{VerificationAnswer::UNKNOWN};
+VerificationResult ImplicitTPA::runSpacer(const ChcDirectedHyperGraph & graph) {
+    Options spacerOpts; // TODO: Do something about the options
+    auto engine = Spacer(logic, spacerOpts);
+    auto res = engine.solve(graph);
+
+    // TODO: Compute the witness!
+
+    return res;
 }
 
 TransitionSystemVerificationResult ImplicitTPA::translateWitness(const VerificationResult & res) {

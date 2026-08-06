@@ -13,7 +13,6 @@ namespace golem {
 class ImplicitTPA : public TransitionSystemEngine {
 public:
     explicit ImplicitTPA(Logic & logic, Options const & options) : logic(logic), options(options) {
-        // TODO: How to deal with witnesses?
         computeWitness = this->options.getOrDefault(Options::COMPUTE_WITNESS, "") == "true";
     }
 
@@ -22,6 +21,10 @@ public:
 private:
     VerificationResult reencodeAndSolve(std::unique_ptr<TransitionSystem> ts);
     VerificationResult reencodeAndSolve(ChcDirectedGraph const & graph);
+
+    std::unique_ptr<ChcDirectedHyperGraph> reencodeTransitionSystem(const TransitionSystem & ts) const;
+
+    VerificationResult runSpacer(const ChcDirectedHyperGraph & graph);
 
     TransitionSystemVerificationResult translateWitness(const VerificationResult & res);
 
