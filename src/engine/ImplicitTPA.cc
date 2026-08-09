@@ -17,6 +17,13 @@
 
 namespace golem {
 
+namespace {
+
+std::string transitionHoleName = "implicit_tpa_tr";
+std::string stateHoleName = "implicit_tpa_inv";
+
+}
+
 VerificationResult ImplicitTPA::solve(ChcDirectedGraph const & graph) {
     if (isTrivial(graph)) {
         return solveTrivial(graph);
@@ -28,11 +35,24 @@ VerificationResult ImplicitTPA::solve(ChcDirectedGraph const & graph) {
 
     if (isTransitionSystem(graph)) {
         auto ts = toTransitionSystem(graph);
-        return reencodeAndSolve(std::move(ts));
+
+        assert(ts);
+        const auto newGraph = reencodeTransitionSystem(*ts);
+
+        assert(newGraph);
+        auto res = runSpacer(*newGraph);
+
+        res.getValidityWitness().print(std::cout, *newGraph);
+
+        if (options.hasOption(Options::COMPUTE_WITNESS)) {
+            return translateTransitionSystemResult(translateWitness(res), graph, *ts);
+        } else {
+            return res;
+        }
     }
 
     if (isTransitionSystemDAG(graph) && !options.hasOption(Options::FORCE_TS)) {
-        return reencodeAndSolve(graph);
+        return VerificationResult{VerificationAnswer::UNKNOWN}; // TODO
     }
 
     // Otherwise, convert the graph to a transition system and try to solve it
@@ -41,23 +61,14 @@ VerificationResult ImplicitTPA::solve(ChcDirectedGraph const & graph) {
     SingleLoopTransformation transformation;
 
     auto [ts, backtranslator] = transformation.transform(graph);
-    assert(ts);
 
-    auto res = reencodeAndSolve(std::move(ts));
-
-    return computeWitness ? backtranslator->translate(translateWitness(res)) : VerificationResult{res.getAnswer()};
-}
-
-VerificationResult ImplicitTPA::reencodeAndSolve(std::unique_ptr<TransitionSystem> ts) {
     assert(ts);
     const auto newGraph = reencodeTransitionSystem(*ts);
 
     assert(newGraph);
-    return runSpacer(*newGraph);
-}
+    auto res = runSpacer(*newGraph);
 
-VerificationResult ImplicitTPA::reencodeAndSolve(ChcDirectedGraph const & graph) {
-    return VerificationResult{VerificationAnswer::UNKNOWN}; // TODO
+    return computeWitness ? backtranslator->translate(translateWitness(res)) : VerificationResult{res.getAnswer()};
 }
 
 std::unique_ptr<ChcDirectedHyperGraph> ImplicitTPA::reencodeTransitionSystem(const TransitionSystem & ts) {
@@ -74,7 +85,7 @@ std::unique_ptr<ChcDirectedHyperGraph> ImplicitTPA::reencodeTransitionSystem(con
             args.push_back(logic.getSortRef(var));
         }
 
-        return logic.declareFun("implicit_tpa_tr", logic.getSort_bool(), args);
+        return logic.declareFun(transitionHoleName, logic.getSort_bool(), args);
     }();
 
     newSystem.addUninterpretedPredicate(transitionHole);
@@ -126,7 +137,7 @@ std::unique_ptr<ChcDirectedHyperGraph> ImplicitTPA::reencodeTransitionSystem(con
             args.push_back(logic.getSortRef(var));
         }
 
-        return logic.declareFun("implicit_tpa_inv", logic.getSort_bool(), args);
+        return logic.declareFun(stateHoleName, logic.getSort_bool(), args);
     }();
 
     newSystem.addUninterpretedPredicate(stateHole);
@@ -138,7 +149,7 @@ std::unique_ptr<ChcDirectedHyperGraph> ImplicitTPA::reencodeTransitionSystem(con
             .interpretedPart = {ts.getInit()},
             .uninterpretedPart = {UninterpretedPredicate(logic.mkUninterpFun(transitionHole, stateVars + nextStateVars))}
         }
-    ); // TODO: Think about the inductivity of this invariant
+    ); // TODO: This is not enough, Spacer interprets Inv as True (well, duh!)
 
     auto normalizedSystem = Normalizer(logic).normalize(newSystem);
 
@@ -146,20 +157,51 @@ std::unique_ptr<ChcDirectedHyperGraph> ImplicitTPA::reencodeTransitionSystem(con
 }
 
 VerificationResult ImplicitTPA::runSpacer(const ChcDirectedHyperGraph & graph) {
-    Options spacerOpts; // TODO: Do something about the options
-    auto engine = Spacer(logic, spacerOpts);
-    auto res = engine.solve(graph);
-
-    // TODO: Compute the witness!
-
-    return res;
+    auto engine = Spacer(logic, options);
+    return engine.solve(graph);
 }
 
 TransitionSystemVerificationResult ImplicitTPA::translateWitness(const VerificationResult & res) {
-    // TODO: How to do this? TransitionSystemVerificationResult wants a state
-    //       invariant or an unrolling level.
+    switch (res.getAnswer()) {
+        case VerificationAnswer::UNSAFE:
+            return translateUnsafeWitness(res.getInvalidityWitness());
+        case VerificationAnswer::SAFE:
+            return translateSafeWitness(res.getValidityWitness());
+        default:
+            return {.answer = VerificationAnswer::UNKNOWN, .witness = 0u};
+    }
+}
 
-    return TransitionSystemVerificationResult{};
+TransitionSystemVerificationResult ImplicitTPA::translateUnsafeWitness(const InvalidityWitness & res) {
+    std::size_t transitionsSeen = 0;
+
+    // TODO: Can we assume that the derivation has no useless steps that would
+    //       increase the counter?
+
+    for (const auto & step : res.getDerivation()) {
+        if (step.clauseId == EId{1}) {
+            ++transitionsSeen;
+        }
+    }
+
+    return {.answer = VerificationAnswer::UNSAFE, .witness = transitionsSeen};
+}
+
+TransitionSystemVerificationResult ImplicitTPA::translateSafeWitness(const ValidityWitness & res) {
+    auto stateHoleInterpretation = std::optional<PTRef>{};
+
+    // TODO: Does this work? (Assuming we get the invariant right...)
+
+    res.run([&](const std::pair<const SymRef, PTRef> & entry) {
+        if (const auto & [symbol, interpretation] = entry;
+            std::string{logic.getSymName(symbol)} == stateHoleName) {
+            stateHoleInterpretation = interpretation;
+        }
+    });
+
+    assert(stateHoleInterpretation);
+
+    return {.answer = VerificationAnswer::SAFE, .witness = *stateHoleInterpretation};
 }
 
 }
