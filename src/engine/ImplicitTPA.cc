@@ -42,8 +42,6 @@ VerificationResult ImplicitTPA::solve(ChcDirectedGraph const & graph) {
         assert(newGraph);
         auto res = runSpacer(*newGraph);
 
-        res.getValidityWitness().print(std::cout, *newGraph);
-
         if (options.hasOption(Options::COMPUTE_WITNESS)) {
             return translateTransitionSystemResult(translateWitness(res), graph, *ts);
         } else {
