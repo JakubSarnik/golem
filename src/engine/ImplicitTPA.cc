@@ -149,6 +149,15 @@ std::unique_ptr<ChcDirectedHyperGraph> ImplicitTPA::reencodeTransitionSystem(con
         }
     ); // TODO: This is not enough, Spacer interprets Inv as True (well, duh!)
 
+    // P(X) <- Inv(X)
+    newSystem.addClause(
+        ChcHead{UninterpretedPredicate{logic.getTerm_false()}},
+        ChcBody{
+            .interpretedPart = {ts.getQuery()},
+            .uninterpretedPart = {UninterpretedPredicate(logic.mkUninterpFun(stateHole, stateVars))}
+        }
+    );
+
     auto normalizedSystem = Normalizer(logic).normalize(newSystem);
 
     return ChcGraphBuilder(logic).buildGraph(normalizedSystem);
