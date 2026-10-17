@@ -191,7 +191,7 @@ std::unique_ptr<ChcDirectedHyperGraph> ImplicitTPA::reencodeDAG(ChcDirectedGraph
     //
     // There are edges of the following kinds:
     //   - Each inner node Sₖ has a self-loop labelled by Transₖ(X, X').
-    //   - Each edge ⊤ → Sₖ is labelled by Initₖ(X), the initial formula of
+    //   - Each edge ⊤ → Sₖ is labelled by Initₖ(X'), the initial formula of
     //     the system Sₖ.
     //   - Each edge Sₖ → ⊥ is labelled by Errorₖ(X), the error formula of
     //     the system Sₖ.
