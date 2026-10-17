@@ -147,9 +147,11 @@ std::unique_ptr<ChcDirectedHyperGraph> ImplicitTPA::reencodeTransitionSystem(con
             .interpretedPart = {ts.getInit()},
             .uninterpretedPart = {UninterpretedPredicate(logic.mkUninterpFun(transitionHole, stateVars + nextStateVars))}
         }
-    ); // TODO: This is not enough, Spacer interprets Inv as True (well, duh!)
+    );
 
     // P(X) <- Inv(X)
+    // TODO: This is not enough for inductiveness, but it should establish a
+    //       safe invariant.
     newSystem.addClause(
         ChcHead{UninterpretedPredicate{logic.getTerm_false()}},
         ChcBody{
