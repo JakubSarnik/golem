@@ -19,14 +19,14 @@ public:
     using TransitionSystemEngine::solve;
     VerificationResult solve(ChcDirectedGraph const & graph) override;
 private:
-    std::unique_ptr<ChcDirectedHyperGraph> reencodeTransitionSystem(const TransitionSystem & ts);
+    std::unique_ptr<ChcDirectedHyperGraph> reencodeTransitionSystem(TransitionSystem const & ts);
     std::unique_ptr<ChcDirectedHyperGraph> reencodeDAG(ChcDirectedGraph const & graph);
 
-    VerificationResult runSpacer(const ChcDirectedHyperGraph & graph);
+    VerificationResult runSpacer(ChcDirectedHyperGraph const & graph);
 
-    TransitionSystemVerificationResult translateWitness(const VerificationResult & res);
-    TransitionSystemVerificationResult translateUnsafeWitness(const InvalidityWitness & res);
-    TransitionSystemVerificationResult translateSafeWitness(const ValidityWitness & res);
+    TransitionSystemVerificationResult translateWitness(VerificationResult const & res);
+    TransitionSystemVerificationResult translateUnsafeWitness(InvalidityWitness const & res);
+    TransitionSystemVerificationResult translateSafeWitness(ValidityWitness const & res);
 
     Logic & logic;
     Options options;

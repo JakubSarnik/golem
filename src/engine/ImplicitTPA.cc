@@ -79,7 +79,7 @@ VerificationResult ImplicitTPA::solve(ChcDirectedGraph const & graph) {
     return computeWitness ? backtranslator->translate(translateWitness(res)) : VerificationResult{res.getAnswer()};
 }
 
-std::unique_ptr<ChcDirectedHyperGraph> ImplicitTPA::reencodeTransitionSystem(const TransitionSystem & ts) {
+std::unique_ptr<ChcDirectedHyperGraph> ImplicitTPA::reencodeTransitionSystem(TransitionSystem const & ts) {
     ChcSystem newSystem;
 
     const SymRef transitionHole = [&] {
@@ -185,12 +185,12 @@ std::unique_ptr<ChcDirectedHyperGraph> ImplicitTPA::reencodeDAG(ChcDirectedGraph
     return ChcGraphBuilder(logic).buildGraph(normalizedSystem);
 }
 
-VerificationResult ImplicitTPA::runSpacer(const ChcDirectedHyperGraph & graph) {
+VerificationResult ImplicitTPA::runSpacer(ChcDirectedHyperGraph const & graph) {
     auto engine = Spacer(logic, options);
     return engine.solve(graph);
 }
 
-TransitionSystemVerificationResult ImplicitTPA::translateWitness(const VerificationResult & res) {
+TransitionSystemVerificationResult ImplicitTPA::translateWitness(VerificationResult const & res) {
     switch (res.getAnswer()) {
         case VerificationAnswer::UNSAFE:
             return translateUnsafeWitness(res.getInvalidityWitness());
@@ -201,7 +201,7 @@ TransitionSystemVerificationResult ImplicitTPA::translateWitness(const Verificat
     }
 }
 
-TransitionSystemVerificationResult ImplicitTPA::translateUnsafeWitness(const InvalidityWitness & res) {
+TransitionSystemVerificationResult ImplicitTPA::translateUnsafeWitness(InvalidityWitness const & res) {
     std::size_t transitionsSeen = 0;
 
     // TODO: Can we assume that the derivation has no useless steps that would
@@ -216,7 +216,7 @@ TransitionSystemVerificationResult ImplicitTPA::translateUnsafeWitness(const Inv
     return {.answer = VerificationAnswer::UNSAFE, .witness = transitionsSeen};
 }
 
-TransitionSystemVerificationResult ImplicitTPA::translateSafeWitness(const ValidityWitness & res) {
+TransitionSystemVerificationResult ImplicitTPA::translateSafeWitness(ValidityWitness const & res) {
     auto stateHoleInterpretation = std::optional<PTRef>{};
 
     // TODO: Does this work? (Assuming we get the invariant right...)
