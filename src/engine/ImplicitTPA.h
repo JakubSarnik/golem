@@ -20,6 +20,7 @@ public:
     VerificationResult solve(ChcDirectedGraph const & graph) override;
 private:
     std::unique_ptr<ChcDirectedHyperGraph> reencodeTransitionSystem(const TransitionSystem & ts);
+    std::unique_ptr<ChcDirectedHyperGraph> reencodeDAG(ChcDirectedGraph const & graph);
 
     VerificationResult runSpacer(const ChcDirectedHyperGraph & graph);
 

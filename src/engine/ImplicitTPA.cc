@@ -50,7 +50,17 @@ VerificationResult ImplicitTPA::solve(ChcDirectedGraph const & graph) {
     }
 
     if (isTransitionSystemDAG(graph) && !options.hasOption(Options::FORCE_TS)) {
-        return VerificationResult{VerificationAnswer::UNKNOWN}; // TODO
+        auto newGraph = reencodeDAG(graph);
+
+        assert(newGraph);
+        auto res = runSpacer(*newGraph);
+
+        // TODO: Witness reconstruction here is much more complicated. We need
+        //       to translate a derivation of false in the new non-linear
+        //       system to a derivation of false in the original linear system,
+        //       and a interpretation of the new predicates into an
+        //       interpretation of the original predicates.
+        return res;
     }
 
     // Otherwise, convert the graph to a transition system and try to solve it
@@ -161,6 +171,16 @@ std::unique_ptr<ChcDirectedHyperGraph> ImplicitTPA::reencodeTransitionSystem(con
     );
 
     auto normalizedSystem = Normalizer(logic).normalize(newSystem);
+
+    return ChcGraphBuilder(logic).buildGraph(normalizedSystem);
+}
+
+std::unique_ptr<ChcDirectedHyperGraph> ImplicitTPA::reencodeDAG(ChcDirectedGraph const & graph){
+    ChcSystem newSystem;
+
+    // TODO
+
+    const auto normalizedSystem = Normalizer(logic).normalize(newSystem);
 
     return ChcGraphBuilder(logic).buildGraph(normalizedSystem);
 }
