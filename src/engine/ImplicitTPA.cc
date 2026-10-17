@@ -176,7 +176,40 @@ std::unique_ptr<ChcDirectedHyperGraph> ImplicitTPA::reencodeTransitionSystem(Tra
 }
 
 std::unique_ptr<ChcDirectedHyperGraph> ImplicitTPA::reencodeDAG(ChcDirectedGraph const & graph){
+    // We assume that the passed graph represents a transition system DAG
+    // (except for self-loops).
+    //
+    // The graph has the following nodes:
+    //   - There is a single entry node ⊤.
+    //   - There is a single exit node ⊥.
+    //   - We denote by S₁, ..., Sₙ the inner nodes of the system, i.e. all
+    //     the nodes except ⊤ and ⊥. We know (from isTransitionSystemDAG) that
+    //     there is at least one such node.
+    //
+    // Each node Sₖ represents a transition system with its own transition
+    // function.
+    //
+    // There are edges of the following kinds:
+    //   - Each inner node Sₖ has a self-loop labelled by Transₖ(X, X').
+    //   - Each edge ⊤ → Sₖ is labelled by Initₖ(X), the initial formula of
+    //     the system Sₖ.
+    //   - Each edge Sₖ → ⊥ is labelled by Errorₖ(X), the error formula of
+    //     the system Sₖ.
+    //   - Each edge Sₖ → Sₗ is Labelled by Switchₖₗ(X, X'). This formula
+    //     is a combined "error" (target) formula for Sₖ and an initial formula
+    //     for Sₗ. Whenever the system Sₖ reaches a state X satisfying
+    //     Switchₖₗ(X, X') for some X', the system Sₗ is initiated in the state
+    //     X = unprime(X').
+    //
+    // Our goal is to produce a new, non-linear CHC system that encodes this
+    // composition of systems in a way that the new system is satisfiable
+    // whenever the original graph can reach ⊥ from ⊤.
+
     ChcSystem newSystem;
+
+    const auto entry = graph.getEntry();
+    const auto exit = graph.getExit();
+    const auto adjList = AdjacencyListsGraphRepresentation::from(graph);
 
     // TODO
 
