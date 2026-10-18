@@ -19,6 +19,7 @@
 #include <set>
 #include <iterator>
 #include <algorithm>
+#include <ranges>
 
 namespace golem {
 
@@ -262,6 +263,14 @@ std::unique_ptr<ChcDirectedHyperGraph> ImplicitTPA::reencodeDAG(ChcDirectedGraph
 
     //const auto adjList = AdjacencyListsGraphRepresentation::from(graph);
     auto newSystem = ChcSystem{};
+
+    for (const auto sym : stateInvariantMap | std::views::values) {
+        newSystem.addUninterpretedPredicate(sym);
+    }
+
+    for (const auto sym : transitionInvariantMap | std::views::values) {
+        newSystem.addUninterpretedPredicate(sym);
+    }
 
     // TODO
 
