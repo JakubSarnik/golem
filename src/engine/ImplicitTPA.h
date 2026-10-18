@@ -8,6 +8,7 @@
 
 #include "Options.h"
 #include "TransitionSystemEngine.h"
+#include <unordered_map>
 
 namespace golem {
 class ImplicitTPA : public TransitionSystemEngine {
@@ -21,6 +22,10 @@ public:
 private:
     std::unique_ptr<ChcDirectedHyperGraph> reencodeTransitionSystem(TransitionSystem const & ts);
     std::unique_ptr<ChcDirectedHyperGraph> reencodeDAG(ChcDirectedGraph const & graph);
+
+    std::vector<PTRef> detectStateVariables(ChcDirectedGraph const & graph);
+    std::unordered_map<SymRef, SymRef, SymRefHash> makeInvariantSymbols(ChcDirectedGraph const & graph,
+        std::vector<SRef> const & argSorts, std::string const & baseName);
 
     VerificationResult runSpacer(ChcDirectedHyperGraph const & graph);
 

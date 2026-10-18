@@ -10,10 +10,15 @@
 #include "Spacer.h"
 
 #include <TransformationUtils.h>
+#include <TermUtils.h>
 #include <utils/StdUtils.h>
 
 #include "graph/ChcGraphBuilder.h"
 #include "transformers/SingleLoopTransformation.h"
+
+#include <set>
+#include <iterator>
+#include <algorithm>
 
 namespace golem {
 
@@ -205,17 +210,98 @@ std::unique_ptr<ChcDirectedHyperGraph> ImplicitTPA::reencodeDAG(ChcDirectedGraph
     // composition of systems in a way that the new system is satisfiable
     // whenever the original graph can reach ⊥ from ⊤.
 
-    ChcSystem newSystem;
+    const auto sendVarsThroughTime = [&](std::vector<PTRef> const & vars, int steps) {
+        const auto tm = TimeMachine{logic};
+
+        auto res = std::vector<PTRef>{};
+
+        for (const auto var : vars) {
+            res.emplace_back(tm.sendVarThroughTime(var, steps));
+        }
+
+        return res;
+    };
+
+    const auto stateVars = detectStateVariables(graph);
+    const auto nextStateVars = sendVarsThroughTime(stateVars, 1);
+    const auto nextNextStateVars = sendVarsThroughTime(stateVars, 2);
 
     const auto entry = graph.getEntry();
     const auto exit = graph.getExit();
-    const auto adjList = AdjacencyListsGraphRepresentation::from(graph);
+
+    const auto makeStateInvariantSymbols = [&] {
+        // *(X)
+        auto argSorts = std::vector<SRef>{};
+
+        for (const auto var : stateVars) {
+            argSorts.push_back(logic.getSortRef(var));
+        }
+
+        return makeInvariantSymbols(graph, argSorts, stateHoleName);
+    };
+
+    const auto makeTransitionInvariantSymbols = [&] {
+        // *(X, X')
+        auto argSorts = std::vector<SRef>{};
+
+        for (const auto var : stateVars) {
+            argSorts.push_back(logic.getSortRef(var));
+        }
+
+        for (const auto var : stateVars) {
+            argSorts.push_back(logic.getSortRef(var));
+        }
+
+        return makeInvariantSymbols(graph, argSorts, transitionHoleName);
+    };
+
+    // Maps a node Sₖ in the graph to its uninterpreted predicate Invₖ(X).
+    const auto stateInvariantMap = makeStateInvariantSymbols();
+    // Maps a node Sₖ in the graph to its uninterpreted predicate Transₖ(X, X').
+    const auto transitionInvariantMap = makeTransitionInvariantSymbols();
+
+    //const auto adjList = AdjacencyListsGraphRepresentation::from(graph);
+    auto newSystem = ChcSystem{};
 
     // TODO
 
     const auto normalizedSystem = Normalizer(logic).normalize(newSystem);
 
     return ChcGraphBuilder(logic).buildGraph(normalizedSystem);
+}
+
+std::vector<PTRef> ImplicitTPA::detectStateVariables(ChcDirectedGraph const & graph) {
+    auto stateVars = std::set<PTRef>{};
+    const auto tm = TimeMachine{logic};
+
+    graph.forEachEdge([&](DirectedEdge const & edge) {
+        auto edgeVars = getVariablesFromEdge(logic, graph, edge.id);
+        std::ranges::copy(edgeVars.stateVars, std::inserter(stateVars, stateVars.end()));
+
+        for (const auto var : edgeVars.nextStateVars) {
+            stateVars.insert(tm.getVarVersionZero(tm.getUnversioned(var)));
+        }
+    });
+
+    // TODO: Do we need the variables ordered somehow?
+    return { stateVars.begin(), stateVars.end() };
+}
+std::unordered_map<SymRef, SymRef, SymRefHash> ImplicitTPA::makeInvariantSymbols(ChcDirectedGraph const & graph,
+    std::vector<SRef> const & argSorts, std::string const & baseName) {
+    auto map = std::unordered_map<SymRef, SymRef, SymRefHash>{};
+
+    int i = 0;
+
+    for (const auto v : graph.getVertices()) {
+        if (v == graph.getEntry() || v == graph.getExit()) {
+            continue;
+        }
+
+        map.emplace(v, logic.declareFun(baseName + "_" + std::to_string(i++),
+            logic.getSort_bool(), argSorts));
+    }
+
+    return map;
 }
 
 VerificationResult ImplicitTPA::runSpacer(ChcDirectedHyperGraph const & graph) {
