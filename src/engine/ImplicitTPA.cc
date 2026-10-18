@@ -227,9 +227,6 @@ std::unique_ptr<ChcDirectedHyperGraph> ImplicitTPA::reencodeDAG(ChcDirectedGraph
     const auto nextStateVars = sendVarsThroughTime(stateVars, 1);
     const auto nextNextStateVars = sendVarsThroughTime(stateVars, 2);
 
-    const auto entry = graph.getEntry();
-    const auto exit = graph.getExit();
-
     const auto makeStateInvariantSymbols = [&] {
         // *(X)
         auto argSorts = std::vector<SRef>{};
@@ -261,20 +258,23 @@ std::unique_ptr<ChcDirectedHyperGraph> ImplicitTPA::reencodeDAG(ChcDirectedGraph
     // Maps a node Sₖ in the graph to its uninterpreted predicate Transₖ(X, X').
     const auto transitionInvariantMap = makeTransitionInvariantSymbols();
 
+    // const auto entry = graph.getEntry();
+    // const auto exit = graph.getExit();
     //const auto adjList = AdjacencyListsGraphRepresentation::from(graph);
-    auto newSystem = ChcSystem{};
+    auto system = ChcSystem{};
 
     for (const auto sym : stateInvariantMap | std::views::values) {
-        newSystem.addUninterpretedPredicate(sym);
+        system.addUninterpretedPredicate(sym);
     }
 
     for (const auto sym : transitionInvariantMap | std::views::values) {
-        newSystem.addUninterpretedPredicate(sym);
+        system.addUninterpretedPredicate(sym);
     }
 
     // TODO
 
     const auto normalizedSystem = Normalizer(logic).normalize(newSystem);
+    const auto normalizedSystem = Normalizer(logic).normalize(system);
 
     return ChcGraphBuilder(logic).buildGraph(normalizedSystem);
 }
