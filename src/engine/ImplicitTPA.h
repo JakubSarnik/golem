@@ -26,6 +26,10 @@ private:
     std::vector<PTRef> detectStateVariables(ChcDirectedGraph const & graph);
     std::unordered_map<SymRef, SymRef, SymRefHash> makeInvariantSymbols(ChcDirectedGraph const & graph,
         std::vector<SRef> const & argSorts, std::string const & baseName);
+    PTRef substituteVars(PTRef term, std::vector<PTRef> const & sourceTerms, std::vector<PTRef> const & targetTerms);
+
+    using matrix_t = std::unordered_map<SymRef, std::unordered_map<SymRef, PTRef, SymRefHash>, SymRefHash>;
+    matrix_t buildTransitionMatrix(AdjacencyListsGraphRepresentation const & adjList, ChcDirectedGraph const & graph);
 
     VerificationResult runSpacer(ChcDirectedHyperGraph const & graph);
 

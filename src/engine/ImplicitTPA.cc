@@ -258,9 +258,6 @@ std::unique_ptr<ChcDirectedHyperGraph> ImplicitTPA::reencodeDAG(ChcDirectedGraph
     // Maps a node Sₖ in the graph to its uninterpreted predicate Transₖ(X, X').
     const auto transitionInvariantMap = makeTransitionInvariantSymbols();
 
-    // const auto entry = graph.getEntry();
-    // const auto exit = graph.getExit();
-    //const auto adjList = AdjacencyListsGraphRepresentation::from(graph);
     auto system = ChcSystem{};
 
     for (const auto sym : stateInvariantMap | std::views::values) {
@@ -271,9 +268,121 @@ std::unique_ptr<ChcDirectedHyperGraph> ImplicitTPA::reencodeDAG(ChcDirectedGraph
         system.addUninterpretedPredicate(sym);
     }
 
-    // TODO
+    const auto entry = graph.getEntry();
+    const auto exit = graph.getExit();
+    const auto adjList = AdjacencyListsGraphRepresentation::from(graph);
+    // TODO: Do we actually need this, or is the diagonal the only thing we require?
+    const auto matrix = buildTransitionMatrix(adjList, graph);
 
-    const auto normalizedSystem = Normalizer(logic).normalize(newSystem);
+    // Add the clauses that the transition invariants are indeed transition
+    // invariants, i.e., for each 1 <= k <= n:
+    //   1. [TInvₖ includes identity]                | TInvₖ(X, X).
+    //   2. [TInvₖ includes the transition relation] | TInvₖ(X, X') ← Transₖ(X, X').
+    //   3. [TInvₖ is closed under composition]      | TInvₖ(X, X'') ← TInvₖ(X, X') ∧ TInvₖ(X', X'').
+
+    for (const auto v : graph.getVertices()) {
+        if (v == entry || v == exit) {
+            continue;
+        }
+
+        assert(transitionInvariantMap.contains(v));
+        const auto tinv = transitionInvariantMap.at(v);
+
+        // 1. TInvₖ(X, X).
+        system.addClause(
+            ChcHead{UninterpretedPredicate{logic.mkUninterpFun(tinv, stateVars + stateVars)}},
+            ChcBody{.interpretedPart = {logic.getTerm_true()}, .uninterpretedPart = {}}
+        );
+
+        // 2. TInvₖ(X, X') ← Transₖ(X, X').
+        system.addClause(
+            ChcHead{UninterpretedPredicate{logic.mkUninterpFun(tinv, stateVars + nextStateVars)}},
+            ChcBody{.interpretedPart = {matrix.at(v).at(v)}, .uninterpretedPart = {}}
+        );
+
+        // 3. TInvₖ(X, X'') ← TInvₖ(X, X') ∧ TInvₖ(X', X'').
+        system.addClause(
+            ChcHead{UninterpretedPredicate{logic.mkUninterpFun(tinv, stateVars + nextNextStateVars)}},
+            ChcBody{.interpretedPart = {logic.getTerm_true()}, .uninterpretedPart = {
+                UninterpretedPredicate{logic.mkUninterpFun(tinv, stateVars + nextStateVars)},
+                UninterpretedPredicate{logic.mkUninterpFun(tinv, nextStateVars + nextNextStateVars)},
+            }}
+        );
+    }
+
+    // For each edge ⊤ → Sₖ (labelled by Initₖ(X')), add the formula
+    //   Invₖ(X') ← Initₖ(X) ∧ TInvₖ(X, X'),
+    // i.e. if the system starts in an initial state and then moves within the
+    // transition system k, it ends in a safe state of k.
+
+    for (const auto edge : adjList.getOutgoingEdgesFor(entry)) {
+        const auto t = graph.getTarget(edge);
+        const auto init = substituteVars(graph.getEdgeLabel(edge), nextStateVars, stateVars);
+
+        assert(t != entry && t != exit);
+        assert(stateInvariantMap.contains(t));
+        assert(transitionInvariantMap.contains(t));
+
+        const auto inv = stateInvariantMap.at(t);
+        const auto tinv = transitionInvariantMap.at(t);
+
+        system.addClause(
+            ChcHead{UninterpretedPredicate{logic.mkUninterpFun(inv, nextStateVars)}},
+            ChcBody{
+                .interpretedPart = {init},
+                .uninterpretedPart = {{
+                    logic.mkUninterpFun(tinv, stateVars + nextStateVars)
+                }}
+            }
+        );
+    }
+
+    // For each edge Sₖ → Sₗ (labelled by Switchₖₗ(X, X')), add the formula
+    //   Invₗ(X'') ← Invₖ(X) ∧ Switchₖₗ(X, X') ∧ TInvₗ(X', X''),
+    // i.e. if the system starts in a safe state in k, switches to l and then
+    // moves within l, it ends in a safe state of l.
+
+    for (const auto s : graph.getVertices()) {
+        if (s == entry) {
+            continue;
+        }
+
+        for (const auto edge : adjList.getOutgoingEdgesFor(s)) {
+            const auto t = graph.getTarget(edge);
+
+            if (t == exit) {
+                continue;
+            }
+
+            assert(stateInvariantMap.contains(s));
+            assert(stateInvariantMap.contains(t));
+            assert(transitionInvariantMap.contains(t));
+
+            const auto invk = stateInvariantMap.at(s);
+            const auto invl = stateInvariantMap.at(t);
+            const auto tinv = transitionInvariantMap.at(t);
+            const auto switch_fla = graph.getEdgeLabel(edge);
+
+            system.addClause(
+                ChcHead{UninterpretedPredicate{logic.mkUninterpFun(invl, nextNextStateVars)}},
+                ChcBody{
+                    .interpretedPart = {switch_fla},
+                    .uninterpretedPart = {
+                        {logic.mkUninterpFun(invk, stateVars)},
+                        {logic.mkUninterpFun(tinv, nextStateVars + nextNextStateVars)}
+                    }
+                }
+            );
+        }
+    }
+
+    // For each edge Sₖ → ⊥ (labelled by Errorₖ(X)), add the formula
+    //   ⊥ ← Invₖ(X) ∧ Errorₖ(X),
+    // i.e. a safe state in k cannot lead to a total unsafe state.
+    // TODO: Do we have an Errorₖ(X) or actually a Safeₖ(X)?
+
+    // TODO: Do we have all the edges now?
+
     const auto normalizedSystem = Normalizer(logic).normalize(system);
 
     return ChcGraphBuilder(logic).buildGraph(normalizedSystem);
@@ -295,6 +404,7 @@ std::vector<PTRef> ImplicitTPA::detectStateVariables(ChcDirectedGraph const & gr
     // TODO: Do we need the variables ordered somehow?
     return { stateVars.begin(), stateVars.end() };
 }
+
 std::unordered_map<SymRef, SymRef, SymRefHash> ImplicitTPA::makeInvariantSymbols(ChcDirectedGraph const & graph,
     std::vector<SRef> const & argSorts, std::string const & baseName) {
     auto map = std::unordered_map<SymRef, SymRef, SymRefHash>{};
@@ -311,6 +421,38 @@ std::unordered_map<SymRef, SymRef, SymRefHash> ImplicitTPA::makeInvariantSymbols
     }
 
     return map;
+}
+
+PTRef ImplicitTPA::substituteVars(PTRef term, std::vector<PTRef> const & sourceTerms,
+    std::vector<PTRef> const & targetTerms) {
+    auto subMap = std::unordered_map<PTRef, PTRef, PTRefHash>{};
+
+    std::ranges::transform(sourceTerms, targetTerms, std::inserter(subMap, subMap.end()),
+        [](PTRef key, PTRef value) { return std::make_pair(key, value); });
+
+    return TermUtils(logic).varSubstitute(term, subMap);
+}
+
+auto ImplicitTPA::buildTransitionMatrix(AdjacencyListsGraphRepresentation const & adjList,
+    ChcDirectedGraph const & graph) -> matrix_t {
+    auto matrix = matrix_t{};
+
+    for (const auto s : graph.getVertices()) {
+        assert(!matrix.contains(s));
+        matrix.emplace(s, std::unordered_map<SymRef, PTRef, SymRefHash>{});
+
+        for (const auto edge : adjList.getOutgoingEdgesFor(s)) {
+            const auto t = graph.getTarget(edge);
+
+            // TODO: For now, we assume that the graph has only one edge for each pair
+            //       of vertices. See MultiEdgeMerger to relax this requirement, or
+            //       combine edges using or here.
+            assert(!matrix.at(s).contains(t));
+            matrix[s].emplace(t, graph.getEdgeLabel(edge));
+        }
+    }
+
+    return matrix;
 }
 
 VerificationResult ImplicitTPA::runSpacer(ChcDirectedHyperGraph const & graph) {
