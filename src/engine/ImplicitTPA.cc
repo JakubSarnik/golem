@@ -378,8 +378,27 @@ std::unique_ptr<ChcDirectedHyperGraph> ImplicitTPA::reencodeDAG(ChcDirectedGraph
 
     // For each edge Sₖ → ⊥ (labelled by Errorₖ(X)), add the formula
     //   ⊥ ← Invₖ(X) ∧ Errorₖ(X),
-    // i.e. a safe state in k cannot lead to a total unsafe state.
-    // TODO: Do we have an Errorₖ(X) or actually a Safeₖ(X)?
+    // i.e. a safe state in k cannot lead to an unsafe state in total.
+
+    for (const auto edge : adjList.getIncomingEdgesFor(exit)) {
+        const auto s = graph.getSource(edge);
+
+        assert(s != entry && s != exit);
+        assert(stateInvariantMap.contains(s));
+
+        const auto inv = stateInvariantMap.at(s);
+        const auto error = graph.getEdgeLabel(edge);
+
+        system.addClause(
+            ChcHead{UninterpretedPredicate{logic.getTerm_false()}},
+            ChcBody{
+                .interpretedPart = {error},
+                .uninterpretedPart = {
+                    {logic.mkUninterpFun(inv, stateVars)}
+                }
+            }
+        );
+    }
 
     // TODO: Do we have all the edges now?
 
