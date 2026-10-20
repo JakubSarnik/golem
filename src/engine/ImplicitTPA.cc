@@ -271,8 +271,7 @@ std::unique_ptr<ChcDirectedHyperGraph> ImplicitTPA::reencodeDAG(ChcDirectedGraph
     const auto entry = graph.getEntry();
     const auto exit = graph.getExit();
     const auto adjList = AdjacencyListsGraphRepresentation::from(graph);
-    // TODO: Do we actually need this, or is the diagonal the only thing we require?
-    const auto matrix = buildTransitionMatrix(adjList, graph);
+    const auto transitionFunctions = detectTransitionFunctions(adjList, graph);
 
     // Add the clauses that the transition invariants are indeed transition
     // invariants, i.e., for each 1 <= k <= n:
@@ -297,7 +296,7 @@ std::unique_ptr<ChcDirectedHyperGraph> ImplicitTPA::reencodeDAG(ChcDirectedGraph
         // 2. TInvₖ(X, X') ← Transₖ(X, X').
         system.addClause(
             ChcHead{UninterpretedPredicate{logic.mkUninterpFun(tinv, stateVars + nextStateVars)}},
-            ChcBody{.interpretedPart = {matrix.at(v).at(v)}, .uninterpretedPart = {}}
+            ChcBody{.interpretedPart = {transitionFunctions.at(v)}, .uninterpretedPart = {}}
         );
 
         // 3. TInvₖ(X, X'') ← TInvₖ(X, X') ∧ TInvₖ(X', X'').
@@ -424,6 +423,31 @@ std::vector<PTRef> ImplicitTPA::detectStateVariables(ChcDirectedGraph const & gr
     return { stateVars.begin(), stateVars.end() };
 }
 
+std::unordered_map<SymRef, PTRef, SymRefHash> ImplicitTPA::detectTransitionFunctions(
+    AdjacencyListsGraphRepresentation const & adjList, ChcDirectedGraph const & graph) {
+    auto functions = std::unordered_map<SymRef, PTRef, SymRefHash>{};
+
+    for (const auto s : graph.getVertices()) {
+        if (s == graph.getEntry() || s == graph.getExit()) {
+            continue;
+        }
+
+        // We assume here that there is only one self-loop for each vertex.
+        // This is possible, since the graph pass MultiEdgeMerger merges
+        // multiple edges between the same vertices into one disjunction.
+
+        const auto edge = std::ranges::find_if(adjList.getOutgoingEdgesFor(s), [&](EId e) {
+            return graph.getTarget(e) == s;
+        });
+
+        assert(edge != adjList.getOutgoingEdgesFor(s).end());
+
+        functions.emplace(s, graph.getEdgeLabel(*edge));
+    }
+
+    return functions;
+}
+
 std::unordered_map<SymRef, SymRef, SymRefHash> ImplicitTPA::makeInvariantSymbols(ChcDirectedGraph const & graph,
     std::vector<SRef> const & argSorts, std::string const & baseName) {
     auto map = std::unordered_map<SymRef, SymRef, SymRefHash>{};
@@ -450,28 +474,6 @@ PTRef ImplicitTPA::substituteVars(PTRef term, std::vector<PTRef> const & sourceT
         [](PTRef key, PTRef value) { return std::make_pair(key, value); });
 
     return TermUtils(logic).varSubstitute(term, subMap);
-}
-
-auto ImplicitTPA::buildTransitionMatrix(AdjacencyListsGraphRepresentation const & adjList,
-    ChcDirectedGraph const & graph) -> matrix_t {
-    auto matrix = matrix_t{};
-
-    for (const auto s : graph.getVertices()) {
-        assert(!matrix.contains(s));
-        matrix.emplace(s, std::unordered_map<SymRef, PTRef, SymRefHash>{});
-
-        for (const auto edge : adjList.getOutgoingEdgesFor(s)) {
-            const auto t = graph.getTarget(edge);
-
-            // TODO: For now, we assume that the graph has only one edge for each pair
-            //       of vertices. See MultiEdgeMerger to relax this requirement, or
-            //       combine edges using or here.
-            assert(!matrix.at(s).contains(t));
-            matrix[s].emplace(t, graph.getEdgeLabel(edge));
-        }
-    }
-
-    return matrix;
 }
 
 VerificationResult ImplicitTPA::runSpacer(ChcDirectedHyperGraph const & graph) {
